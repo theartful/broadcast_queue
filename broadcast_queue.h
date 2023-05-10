@@ -72,11 +72,11 @@ public:
     size_t sequence_number =
         m_sequence_numbers[pos].load(std::memory_order_relaxed);
 
-    cur.m_sequence_number = sequence_number + 1;
-    m_cursor.store(cur, std::memory_order_release);
-
     m_sequence_numbers[pos].store(sequence_number + 1,
                                   std::memory_order_release);
+
+    cur.m_sequence_number = sequence_number + 1;
+    m_cursor.store(cur, std::memory_order_release);
 
     const storage_type *value_as_storage =
         reinterpret_cast<const storage_type *>(&value);
@@ -216,7 +216,7 @@ private:
     size_t old_sn = sn0 - 2;
 
     // this means that we're at the tip of the queue, so we just have to
-    // wait until m_pos is updated
+    // wait until m_cursor is updated
     if (sn == old_sn) {
       std::unique_lock<std::mutex> lock{cv_mutex};
       cv.wait_until(lock, until, [this, pos, old_sn]() {
