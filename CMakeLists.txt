@@ -55,7 +55,11 @@ install(
 if(BUILD_TESTING)
     enable_testing()
     find_package(GTest REQUIRED)
-    add_executable(tests tests/single_threaded_tests.cpp)
+    add_executable(
+    tests
+        tests/single_threaded_tests.cpp
+        tests/multi_threaded_tests.cpp
+    )
     target_link_libraries(tests GTest::gtest_main broadcast_queue)
     gtest_discover_tests(tests)
 endif()
