@@ -27,7 +27,7 @@ enum class Error {
 
 namespace details {
 
-struct Cursor {
+struct alignas(uint64_t) Cursor {
   uint32_t m_pos;             // the position the writer will write on next
   uint32_t m_sequence_number; // the sequence number of the element on which the
                               // writer will write on next
