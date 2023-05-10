@@ -240,7 +240,7 @@ private:
 
 template <typename T> class receiver {
 public:
-  receiver(std::shared_ptr<details::queue_data<T>> internal_)
+  receiver(std::shared_ptr<details::queue_data<T>> internal_ = nullptr)
       : m_internal{internal_} {
 
     if (!internal_)
