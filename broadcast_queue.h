@@ -97,7 +97,7 @@ public:
       cur.m_pos = (pos + 1) % m_capacity;
       cur.m_sequence_number =
           m_sequence_numbers[cur.m_pos].load(std::memory_order_relaxed);
-      m_cursor.store(cur);
+      m_cursor.store(cur, std::memory_order_relaxed);
     }
 
     cv.notify_all();
@@ -210,16 +210,20 @@ public:
 
 private:
   bool wait_for_new_data(const std::chrono::steady_clock::time_point &until,
-                         size_t pos, size_t sn0) {
+                         uint32_t pos, uint32_t sn0) {
     size_t sn = sequence_number(pos);
+
+    size_t old_sn = sn0 - 2;
 
     // this means that we're at the tip of the queue, so we just have to
     // wait until m_pos is updated
-    size_t old_sn = sn0 - 2;
     if (sn == old_sn) {
       std::unique_lock<std::mutex> lock{cv_mutex};
-      cv.wait_until(lock, until, [this, pos]() {
-        return m_cursor.load(std::memory_order_relaxed).m_pos != pos;
+      cv.wait_until(lock, until, [this, pos, old_sn]() {
+        // the condition variable is on m_cursor not on the sequence numbers,
+        // but if the cursor has gone over `pos` then it has to have updated
+        // the sequence number before changing the cursor value
+        return sequence_number(pos) != old_sn;
       });
     }
     return m_sequence_numbers[pos].load(std::memory_order_relaxed) != old_sn;
