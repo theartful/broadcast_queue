@@ -27,6 +27,12 @@ enum class Error {
 
 namespace details {
 
+struct Cursor {
+  uint32_t m_pos;             // the position the writer will write on next
+  uint32_t m_sequence_number; // the sequence number of the element on which the
+                              // writer will write on next
+};
+
 template <typename T> class queue_data {
   static_assert(std::is_trivially_copyable<T>::value,
                 "Type T of broadcast_queue has to be trivially copyable!");
@@ -50,20 +56,27 @@ template <typename T> class queue_data {
 public:
   using value_type = T;
 
-  queue_data(size_t capacity_) : m_capacity{capacity_}, m_pos{0} {
+  queue_data(size_t capacity_) : m_capacity{capacity_}, m_cursor{Cursor{0, 0}} {
+    // uninititalized storage
     m_storage = new std::atomic<storage_type>[m_capacity * storage_per_element];
-    m_sequence_numbers = new std::atomic<size_t>[m_capacity]();
+
+    // zero inititalized sequence numbers
+    m_sequence_numbers = new std::atomic<uint32_t>[m_capacity]();
   }
 
   void push(const T &value) {
-    size_t pos = m_pos.load(std::memory_order_relaxed);
+    Cursor cur = m_cursor.load(std::memory_order_relaxed);
+    uint32_t pos = cur.m_pos;
     size_t storage_pos = pos * storage_per_element;
 
     size_t sequence_number =
-        m_sequence_numbers[m_pos].load(std::memory_order_relaxed);
+        m_sequence_numbers[pos].load(std::memory_order_relaxed);
 
-    m_sequence_numbers[m_pos].store(sequence_number + 1,
-                                    std::memory_order_release);
+    cur.m_sequence_number = sequence_number + 1;
+    m_cursor.store(cur, std::memory_order_release);
+
+    m_sequence_numbers[pos].store(sequence_number + 1,
+                                  std::memory_order_release);
 
     const storage_type *value_as_storage =
         reinterpret_cast<const storage_type *>(&value);
@@ -77,18 +90,21 @@ public:
                                      std::memory_order_relaxed);
     }
 
-    m_sequence_numbers[m_pos].store(sequence_number + 2,
-                                    std::memory_order_release);
+    m_sequence_numbers[pos].store(sequence_number + 2,
+                                  std::memory_order_release);
     {
       std::lock_guard<std::mutex> lock(cv_mutex);
-      m_pos.store((pos + 1) % m_capacity, std::memory_order_release);
+      cur.m_pos = (pos + 1) % m_capacity;
+      cur.m_sequence_number =
+          m_sequence_numbers[cur.m_pos].load(std::memory_order_relaxed);
+      m_cursor.store(cur);
     }
 
     cv.notify_all();
   }
 
   template <typename Rep, typename Period>
-  Error read(T *result, size_t *reader_pos, size_t *reader_sequence_number,
+  Error read(T *result, uint32_t *reader_pos, uint32_t *reader_sequence_number,
              const std::chrono::duration<Rep, Period> &timeout) {
 
     size_t storage_pos = *reader_pos * storage_per_element;
@@ -142,23 +158,46 @@ public:
 
     } while (std::chrono::steady_clock::now() < until);
 
-    // check lagging
-    if (error == Error::None && *reader_sequence_number != 0) {
-      if ((*reader_pos != 0 &&
-           sequence_number_after != *reader_sequence_number) ||
-          (*reader_pos == 0 &&
-           *reader_sequence_number + 2 != sequence_number_after)) {
-        error = Error::Lagged;
+    if (error != Error::Timeout) {
+      if (sequence_number_after != *reader_sequence_number) {
+        Cursor cur = m_cursor.load(std::memory_order_relaxed);
+        // lagging will effectively cause resubscription
+        *reader_pos = cur.m_pos;
+        *reader_sequence_number = cur.m_sequence_number;
+        if (*reader_sequence_number & 1)
+          *reader_sequence_number += 1;
+        else
+          *reader_sequence_number += 2;
+
+        // TODO: make it optional between resubscription and resetting to the
+        // oldest data
+        // the problem with resetting to the oldest data is in the case of a
+        // fast writer, the oldest data will be written on, and it would cause
+        // the reader to lag again
+
+        return Error::Lagged;
+      } else {
+        *reader_pos = (*reader_pos + 1) % m_capacity;
+
+        if (*reader_pos == 0) {
+          // new sequeuce number!
+          *reader_sequence_number = sequence_number_after + 2;
+        } else {
+          *reader_sequence_number = sequence_number_after;
+        }
       }
     }
-
-    *reader_sequence_number = sequence_number_after;
-    *reader_pos = (*reader_pos + 1) % m_capacity;
 
     return error;
   }
 
-  size_t pos() { return m_pos.load(std::memory_order_relaxed); }
+  template <typename Rep, typename Period>
+  Error read(T *result, Cursor *cursor,
+             const std::chrono::duration<Rep, Period> &timeout) {
+    return read(result, &cursor->m_pos, &cursor->m_sequence_number, timeout);
+  }
+
+  Cursor cursor() { return m_cursor.load(std::memory_order_relaxed); }
   size_t capacity() { return m_capacity; }
   size_t sequence_number(size_t pos) {
     return m_sequence_numbers[pos].load(std::memory_order_relaxed);
@@ -172,14 +211,15 @@ public:
 private:
   bool wait_for_new_data(const std::chrono::steady_clock::time_point &until,
                          size_t pos, size_t sn0) {
-    size_t sn = m_sequence_numbers[pos].load(std::memory_order_relaxed);
+    size_t sn = sequence_number(pos);
+
     // this means that we're at the tip of the queue, so we just have to
     // wait until m_pos is updated
-    size_t old_sn = (pos == 0) ? sn0 : sn0 - 2;
+    size_t old_sn = sn0 - 2;
     if (sn == old_sn) {
       std::unique_lock<std::mutex> lock{cv_mutex};
       cv.wait_until(lock, until, [this, pos]() {
-        return m_pos.load(std::memory_order_relaxed) != pos;
+        return m_cursor.load(std::memory_order_relaxed).m_pos != pos;
       });
     }
     return m_sequence_numbers[pos].load(std::memory_order_relaxed) != old_sn;
@@ -187,9 +227,9 @@ private:
 
 private:
   size_t m_capacity;
-  std::atomic<size_t> m_pos;
+  std::atomic<Cursor> m_cursor;
   std::atomic<storage_type> *m_storage;
-  std::atomic<size_t> *m_sequence_numbers;
+  std::atomic<uint32_t> *m_sequence_numbers;
 
   // for waiting
   std::mutex cv_mutex;
@@ -201,7 +241,18 @@ private:
 template <typename T> class receiver {
 public:
   receiver(std::shared_ptr<details::queue_data<T>> internal_)
-      : m_internal{internal_}, m_pos{internal_->pos()}, m_sequence_number{0} {}
+      : m_internal{internal_} {
+
+    if (!internal_)
+      return;
+
+    m_cursor = internal_->cursor();
+
+    if (m_cursor.m_sequence_number & 1)
+      m_cursor.m_sequence_number += 1;
+    else
+      m_cursor.m_sequence_number += 2;
+  }
 
   template <typename Rep, typename Period>
   Error wait_dequeue_timed(T *result,
@@ -213,7 +264,7 @@ public:
       return Error::Closed;
     }
 
-    return internal_sptr->read(result, &m_pos, &m_sequence_number, timeout);
+    return internal_sptr->read(result, &m_cursor, timeout);
   }
 
   Error try_dequeue(T *result) {
@@ -224,8 +275,7 @@ public:
 
 private:
   std::weak_ptr<details::queue_data<T>> m_internal;
-  size_t m_pos;
-  size_t m_sequence_number;
+  details::Cursor m_cursor;
 };
 
 template <typename T> class sender {
