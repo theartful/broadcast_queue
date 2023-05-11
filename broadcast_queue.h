@@ -204,8 +204,8 @@ public:
   }
 
   ~queue_data() {
-    delete m_storage;
-    delete m_sequence_numbers;
+    delete[] m_storage;
+    delete[] m_sequence_numbers;
   }
 
 private:
