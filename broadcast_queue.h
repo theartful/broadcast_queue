@@ -60,8 +60,10 @@ public:
     // uninititalized storage
     m_storage = new std::atomic<storage_type>[m_capacity * storage_per_element];
 
-    // zero inititalized sequence numbers
-    m_sequence_numbers = new std::atomic<uint32_t>[m_capacity]();
+    // zero inititalize sequence numbers
+    m_sequence_numbers = new std::atomic<uint32_t>[m_capacity];
+    for (size_t i = 0; i < m_capacity; i++)
+      m_sequence_numbers[i].store(0, std::memory_order_relaxed);
   }
 
   void push(const T &value) {
