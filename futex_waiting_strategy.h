@@ -2,9 +2,9 @@
 #define THEARTFUL_BROADCAST_QUEUE_FUTEX_WAITER
 #if __unix__
 
+#include <cerrno>
 #include <chrono>
 #include <climits>
-#include <cerrno>
 #include <linux/futex.h>
 #include <sys/syscall.h>
 #include <system_error>
@@ -53,7 +53,7 @@ public:
 
     do {
       if (m_queue->sequence_number(reader_pos) != old_sequence_number)
-        break;
+        return true;
 
       long result =
           ::syscall(SYS_futex,
@@ -78,7 +78,8 @@ public:
       }
     } while (std::chrono::steady_clock::now() < until);
 
-    return m_queue->sequence_number(reader_pos) != old_sequence_number;
+    // we timed out
+    return false;
   }
 
 private:
