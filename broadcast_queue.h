@@ -150,7 +150,8 @@ public:
   using value_type = T;
 
   queue_data(size_t capacity_)
-      : m_capacity{capacity_}, m_cursor{Cursor{0, 0}}, m_waiter{this} {
+      : m_capacity{capacity_}, m_subscribers{0}, m_cursor{Cursor{0, 0}},
+        m_waiter{this} {
 
     // uninititalized storage
     m_storage_blocks = new storage_block<T>[m_capacity];
@@ -245,10 +246,15 @@ public:
     return m_storage_blocks[pos].sequence_number;
   }
 
+  size_t subscribers() { return m_subscribers.load(std::memory_order_relaxed); }
+  void subscribe() { m_subscribers.fetch_add(1, std::memory_order_relaxed); }
+  void unsubscribe() { m_subscribers.fetch_sub(1, std::memory_order_relaxed); }
+
   ~queue_data() { delete[] m_storage_blocks; }
 
 private:
   size_t m_capacity;
+  std::atomic<size_t> m_subscribers;
   std::atomic<Cursor> m_cursor;
   storage_block<T> *m_storage_blocks;
 
@@ -309,12 +315,19 @@ public:
     if (!internal_)
       return;
 
+    internal_->subscribe();
     m_cursor = internal_->cursor();
 
     if (m_cursor.m_sequence_number & 1)
       m_cursor.m_sequence_number += 1;
     else
       m_cursor.m_sequence_number += 2;
+  }
+
+  ~receiver() {
+    std::shared_ptr<queue_data> internal_sptr = m_internal.lock();
+    if (internal_sptr)
+      internal_sptr->unsubscribe();
   }
 
   template <typename Rep, typename Period>

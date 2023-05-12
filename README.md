@@ -73,12 +73,13 @@ int main()
 }
 ```
 
-## Is this lock-free?
+## Is this queue lock-free?
 
-Not quite. Condition variables are used to prevent busy waiting, which require
-mutexes. I tried using C++20 `std::atomic<T>::wait` but they performed worse. I
-might try semaphores later on and see how they compare, but I need to write some
-benchmarks first.
+Depending on the waiting strategy you use. The default strategy uses condition
+variables, which requires locks, but in return we get less cpu usage. But if you
+prefer a lock-free queue, you can use the semaphore waiting strategy, which will
+give better speeds for reading and writing into the queue, but will use more cpu
+time due to the required busy waiting.
 
 ## Use
 
@@ -98,6 +99,11 @@ FetchContent_MakeAvailable(broadcast_queue)
 
 target_link_libraries(target PUBLIC broadcast_queue)
 ```
+
+## TODO
+
+- [ ] Implement the `semaphore` class on Windows and MacOS.
+- [ ] Support non trivially copyable and non trivially destructible data types.
 
 [1]: https://www.hpl.hp.com/techreports/2012/HPL-2012-68.pdf 
 

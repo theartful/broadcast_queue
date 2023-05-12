@@ -6,7 +6,10 @@
 #include <vector>
 
 #include "broadcast_queue.h"
+#ifdef __unix__
 #include "futex_waiting_strategy.h"
+#include "semaphore_waiting_strategy.h"
+#endif
 
 #include <moodycamel/concurrentqueue.h>
 
@@ -137,6 +140,20 @@ int main() {
   print_results(run_broadcast_queue_bench(1024, 10, std::chrono::seconds(10)));
   printf("\n");
 
+#ifdef __unix__
+  printf("broadcast_queue<semaphore_waiting_strategy>:\n");
+  printf("----------------------------------------\n");
+  print_results(
+      run_broadcast_queue_bench<broadcast_queue::semaphore_waiting_strategy>(
+          1024, 1, std::chrono::seconds(10)));
+  print_results(
+      run_broadcast_queue_bench<broadcast_queue::semaphore_waiting_strategy>(
+          1024, 5, std::chrono::seconds(10)));
+  print_results(
+      run_broadcast_queue_bench<broadcast_queue::semaphore_waiting_strategy>(
+          1024, 10, std::chrono::seconds(10)));
+  printf("\n");
+
   printf("broadcast_queue<futex_waiting_strategy>:\n");
   printf("----------------------------------------\n");
   print_results(
@@ -149,6 +166,7 @@ int main() {
       run_broadcast_queue_bench<broadcast_queue::futex_waiting_strategy>(
           1024, 10, std::chrono::seconds(10)));
   printf("\n");
+#endif
 
   printf("moodycamel::ConcurrentQueue:\n");
   printf("----------------------------\n");

@@ -7,6 +7,9 @@
 #ifdef __unix__
 #include "futex_waiting_strategy.h"
 #endif
+#ifdef __cpp_lib_semaphore
+#include "semaphore_waiting_strategy.h"
+#endif
 
 template <typename T, template <typename> typename WaitingStrategy>
 struct TestTypes {
@@ -27,10 +30,10 @@ using MyTypes = ::testing::Types<
     TestTypes<std::array<char, 16>, broadcast_queue::default_waiting_strategy>,
     TestTypes<std::array<char, 1024>,
               broadcast_queue::default_waiting_strategy>,
-    TestTypes<std::array<char, 2048>,
-              broadcast_queue::default_waiting_strategy>,
+    TestTypes<std::array<char, 2048>, broadcast_queue::default_waiting_strategy>
 
 #ifdef __unix__
+    ,
     TestTypes<int, broadcast_queue::futex_waiting_strategy>,
     TestTypes<float, broadcast_queue::futex_waiting_strategy>,
     TestTypes<std::array<char, 16>, broadcast_queue::futex_waiting_strategy>,
@@ -41,6 +44,25 @@ using MyTypes = ::testing::Types<
     TestTypes<std::array<char, 16>, broadcast_queue::futex_waiting_strategy>,
     TestTypes<std::array<char, 1024>, broadcast_queue::futex_waiting_strategy>,
     TestTypes<std::array<char, 2048>, broadcast_queue::futex_waiting_strategy>
+#endif
+#ifdef __cpp_lib_semaphore
+    ,
+    TestTypes<int, broadcast_queue::semaphore_waiting_strategy>,
+    TestTypes<float, broadcast_queue::semaphore_waiting_strategy>,
+    TestTypes<std::array<char, 16>,
+              broadcast_queue::semaphore_waiting_strategy>,
+    TestTypes<std::array<char, 1024>,
+              broadcast_queue::semaphore_waiting_strategy>,
+    TestTypes<std::array<char, 2048>,
+              broadcast_queue::semaphore_waiting_strategy>,
+    TestTypes<int, broadcast_queue::semaphore_waiting_strategy>,
+    TestTypes<float, broadcast_queue::semaphore_waiting_strategy>,
+    TestTypes<std::array<char, 16>,
+              broadcast_queue::semaphore_waiting_strategy>,
+    TestTypes<std::array<char, 1024>,
+              broadcast_queue::semaphore_waiting_strategy>,
+    TestTypes<std::array<char, 2048>,
+              broadcast_queue::semaphore_waiting_strategy>
 #endif
     >;
 
@@ -109,7 +131,7 @@ TYPED_TEST(MultiThreaded, LaggedReceiver) {
       sender.subscribe();
 
   std::chrono::microseconds sender_latency{100};
-  std::chrono::microseconds receiver_latency{200};
+  std::chrono::microseconds receiver_latency{1000};
 
   std::atomic<bool> should_stop{false};
 

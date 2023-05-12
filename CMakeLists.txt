@@ -37,7 +37,7 @@ install(
 )
 
 install(
-    FILES broadcast_queue.h futex_waiting_strategy.h
+    FILES broadcast_queue.h futex_waiting_strategy.h semaphore_waiting_strategy.h
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}"
 )
 
