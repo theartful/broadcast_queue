@@ -6,8 +6,6 @@
 #include <thread>
 #ifdef __unix__
 #include "futex_waiting_strategy.h"
-#endif
-#ifdef __cpp_lib_semaphore
 #include "semaphore_waiting_strategy.h"
 #endif
 
