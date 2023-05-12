@@ -37,7 +37,7 @@ install(
 )
 
 install(
-    FILES broadcast_queue.h
+    FILES broadcast_queue.h futex_waiting_strategy.h
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}"
 )
 
@@ -62,4 +62,10 @@ if(BUILD_TESTING)
     )
     target_link_libraries(tests GTest::gtest_main broadcast_queue)
     gtest_discover_tests(tests)
+endif()
+
+if(BUILD_BENCHES)
+    find_package(concurrentqueue)
+    add_executable(messages_per_second benches/messages_per_second.cpp)
+    target_link_libraries(messages_per_second broadcast_queue concurrentqueue::concurrentqueue)
 endif()
