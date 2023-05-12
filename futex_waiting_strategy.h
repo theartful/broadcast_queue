@@ -59,7 +59,7 @@ public:
           ::syscall(SYS_futex,
                     static_cast<const void *>(
                         &m_queue->m_storage_blocks[reader_pos].sequence_number),
-                    FUTEX_WAIT, reader_sequence_number, &timeout_spec, NULL, 0);
+                    FUTEX_WAIT, old_sequence_number, &timeout_spec, NULL, 0);
 
       if (result == -1) {
         switch (errno) {
