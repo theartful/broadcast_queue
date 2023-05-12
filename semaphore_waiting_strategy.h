@@ -100,16 +100,10 @@ template <typename T> class semaphore_waiting_strategy {
 public:
   semaphore_waiting_strategy(details::queue_data<T, self> *queue)
       : m_queue{queue} {
-
-    m_semaphores = (semaphore *)std::aligned_alloc(
-        alignof(semaphore), sizeof(semaphore) * m_queue->capacity());
-
-    for (size_t i = 0; i < m_queue->capacity(); i++) {
-      std::construct_at(&m_semaphores[i], 0);
-    }
+    m_semaphores = new semaphore[m_queue->capacity()]();
   }
 
-  ~semaphore_waiting_strategy() { std::free(m_semaphores); }
+  ~semaphore_waiting_strategy() { delete[] m_semaphores; }
 
   void notify(uint32_t pos, uint32_t sequence_number) {
     auto subscribers = m_queue->subscribers();
