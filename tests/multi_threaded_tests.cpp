@@ -42,8 +42,6 @@ using MyTypes = ::testing::Types<
     TestTypes<std::array<char, 16>, broadcast_queue::futex_waiting_strategy>,
     TestTypes<std::array<char, 1024>, broadcast_queue::futex_waiting_strategy>,
     TestTypes<std::array<char, 2048>, broadcast_queue::futex_waiting_strategy>
-#endif
-#ifdef __cpp_lib_semaphore
     ,
     TestTypes<int, broadcast_queue::semaphore_waiting_strategy>,
     TestTypes<float, broadcast_queue::semaphore_waiting_strategy>,
