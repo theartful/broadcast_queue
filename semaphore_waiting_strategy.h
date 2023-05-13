@@ -2,11 +2,14 @@
 #define THEARTFUL_BROADCAST_QUEUE_SEMAPHORE_WAITER
 
 #include <cstdlib>
+#include <ctime>
 #include <semaphore>
 #include <system_error>
+#include <thread>
 #include <vector>
 #if __unix__
 #include <semaphore.h>
+#include <time.h>
 #endif
 
 #include "broadcast_queue.h"
@@ -49,14 +52,22 @@ public:
   template <typename Rep, typename Period>
   bool try_acquire_for(const std::chrono::duration<Rep, Period> &timeout) {
     struct timespec timeout_spec;
-    timeout_spec.tv_sec =
-        std::chrono::duration_cast<std::chrono::seconds>(timeout).count();
-    timeout_spec.tv_nsec =
-        std::chrono::duration_cast<std::chrono::nanoseconds>(
-            timeout - std::chrono::seconds(timeout_spec.tv_sec))
+    clock_gettime(CLOCK_MONOTONIC, &timeout_spec);
+
+    auto secs = std::chrono::duration_cast<std::chrono::seconds>(timeout);
+
+    timeout_spec.tv_sec += secs.count();
+    timeout_spec.tv_nsec +=
+        std::chrono::duration_cast<std::chrono::nanoseconds>(timeout - secs)
             .count();
 
-    if (sem_timedwait(&m_semaphore, &timeout_spec) == 0) {
+    // make sure that tv_nsec is less than 1e9
+    if (timeout_spec.tv_nsec > 1000000000) {
+      timeout_spec.tv_sec++;
+      timeout_spec.tv_nsec -= 1000000000;
+    }
+
+    if (sem_clockwait(&m_semaphore, CLOCK_MONOTONIC, &timeout_spec) == 0) {
       return true;
     } else {
       if (errno == ETIMEDOUT || errno == EINTR) {
@@ -122,13 +133,24 @@ public:
 
     uint32_t old_sequence_number = reader_sequence_number - 2;
 
-    if (m_queue->sequence_number(reader_pos) != old_sequence_number)
+    auto &block = m_queue->block(reader_pos);
+
+    if (block.sequence_number() != old_sequence_number)
       return true;
+
+    constexpr int atomic_spin_count = 128;
+
+    for (int i = 0; i < atomic_spin_count; i++) {
+      if (block.sequence_number() != old_sequence_number)
+        return true;
+
+      std::this_thread::yield();
+    }
 
     auto until = std::chrono::steady_clock::now() + timeout;
     do {
-      if (m_semaphores[reader_pos].try_acquire_until(until)) {
-        if (m_queue->sequence_number(reader_pos) != old_sequence_number) {
+      if (m_semaphores[reader_pos].try_acquire_for(timeout)) {
+        if (block.sequence_number() != old_sequence_number) {
           return true;
         }
       }

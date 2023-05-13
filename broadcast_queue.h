@@ -21,6 +21,16 @@
 #define _BROADCAST_QUEUE_TSO_MODEL
 #endif
 
+#ifndef BROADCAST_QUEUE_CACHE_LINE_SIZE
+#ifdef __cpp_lib_hardware_interference_size
+#include <new>
+#define BROADCAST_QUEUE_CACHE_LINE_SIZE                                        \
+  std::hardware_destructive_interference_size
+#else
+#define BROADCAST_QUEUE_CACHE_LINE_SIZE 64
+#endif
+#endif
+
 namespace broadcast_queue {
 
 enum class Error {
@@ -73,12 +83,12 @@ public:
   }
 
   uint32_t
-  sequence_number(std::memory_order order = std::memory_order_relaxed) {
+  sequence_number(std::memory_order order = std::memory_order_relaxed) const {
     return m_storage.load(order).sequence_number;
   }
 
-  void *sequence_number_address() {
-    return &reinterpret_cast<value_with_sequence_number<T> *>(&m_storage)
+  const void *sequence_number_address() const {
+    return &reinterpret_cast<const value_with_sequence_number<T> *>(&m_storage)
                 ->sequence_number;
   }
 
@@ -172,11 +182,11 @@ public:
   }
 
   uint32_t
-  sequence_number(std::memory_order order = std::memory_order_relaxed) {
+  sequence_number(std::memory_order order = std::memory_order_relaxed) const {
     return m_sequence_number.load(order);
   }
 
-  void *sequence_number_address() { return &m_sequence_number; }
+  const void *sequence_number_address() const { return &m_sequence_number; }
 
 private:
 #ifdef _BROADCAST_QUEUE_TSO_MODEL
@@ -309,6 +319,8 @@ public:
     return m_storage_blocks[pos].sequence_number(order);
   }
 
+  const storage_block<T> &block(size_t pos) { return m_storage_blocks[pos]; }
+
   size_t subscribers() { return m_subscribers.load(std::memory_order_relaxed); }
   void subscribe() { m_subscribers.fetch_add(1, std::memory_order_relaxed); }
   void unsubscribe() { m_subscribers.fetch_sub(1, std::memory_order_relaxed); }
@@ -318,10 +330,12 @@ public:
 private:
   size_t m_capacity;
   std::atomic<size_t> m_subscribers;
-  std::atomic<Cursor> m_cursor;
   storage_block<T> *m_storage_blocks;
-
   WaitingStrategy m_waiter;
+
+  // prevents false sharing between the writer who constantly updates this
+  // m_cursor and the readers who constantly read m_storage_blocks
+  alignas(BROADCAST_QUEUE_CACHE_LINE_SIZE) std::atomic<Cursor> m_cursor;
 };
 
 } // namespace details
@@ -343,16 +357,18 @@ public:
             const std::chrono::duration<Rep, Period> &timeout) {
 
     uint32_t old_sequence_number = reader_sequence_number - 2;
+
+    auto &block = m_queue->block(reader_pos);
     // this means that we're at the tip of the queue, so we just have to
     // wait until m_cursor is updated
-    if (m_queue->sequence_number(reader_pos) == old_sequence_number) {
+    if (block.sequence_number() == old_sequence_number) {
       std::unique_lock<std::mutex> lock{m_mutex};
       return m_cv.wait_for(
-          lock, timeout, [this, reader_pos, old_sequence_number]() {
+          lock, timeout, [&block, reader_pos, old_sequence_number]() {
             // the condition variable is on m_cursor not on the sequence
             // numbers, but if the cursor has gone over `pos` then it has to
             // have updated the sequence number before changing the cursor value
-            return m_queue->sequence_number(reader_pos) != old_sequence_number;
+            return block.sequence_number() != old_sequence_number;
           });
     }
     return true;
