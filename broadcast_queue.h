@@ -32,16 +32,71 @@ enum class Error {
 
 namespace details {
 
+template <typename T> struct alignas(uint64_t) value_with_sequence_number {
+  uint32_t sequence_number;
+  T value;
+};
+
+template <typename T> static constexpr bool is_always_lock_free() {
+#ifdef __cpp_lib_atomic_is_always_lock_free
+  return std::atomic<T>::is_always_lock_free;
+#else
+  return sizeof(T) < 8 && std::is_trivially_destructible<T>::value &&
+         std::is_trivially_copyable<T>::value;
+#endif
+}
+
+template <typename T, typename = void> class storage_block;
+
 template <typename T, typename WaitingStrategy> class queue_data;
 
-template <typename T> struct storage_block {
-
-  storage_block() { sequence_number.store(0, std::memory_order_relaxed); }
+template <typename T>
+class storage_block<T, typename std::enable_if<is_always_lock_free<
+                           value_with_sequence_number<T>>()>::type> {
+public:
+  storage_block() { m_storage.store({0, 0}, std::memory_order_relaxed); }
 
   void store(const T &value) {
-    uint32_t sn = sequence_number.load(std::memory_order_relaxed);
+    auto old_storage = m_storage.load(std::memory_order_relaxed);
+    uint32_t old_sn = old_storage.sequence_number;
+    value_with_sequence_number<T> new_storage = {old_sn + 2, value};
+    m_storage.store(new_storage, std::memory_order_relaxed);
+  }
 
-    sequence_number.store(sn + 1, std::memory_order_release);
+  bool try_load(T *value, uint32_t *read_sequence_number,
+                const std::chrono::steady_clock::time_point /* until */) {
+    auto old_storage = m_storage.load(std::memory_order_relaxed);
+    *value = old_storage.value;
+    *read_sequence_number = old_storage.sequence_number;
+
+    return true;
+  }
+
+  uint32_t
+  sequence_number(std::memory_order order = std::memory_order_relaxed) {
+    return m_storage.load(order).sequence_number;
+  }
+
+  void *sequence_number_address() {
+    return &reinterpret_cast<value_with_sequence_number<T> *>(&m_storage)
+                ->sequence_number;
+  }
+
+private:
+  std::atomic<value_with_sequence_number<T>> m_storage;
+};
+
+template <typename T>
+class storage_block<T, typename std::enable_if<!is_always_lock_free<
+                           value_with_sequence_number<T>>()>::type> {
+
+public:
+  storage_block() { m_sequence_number.store(0, std::memory_order_relaxed); }
+
+  void store(const T &value) {
+    uint32_t sn = m_sequence_number.load(std::memory_order_relaxed);
+
+    m_sequence_number.store(sn + 1, std::memory_order_release);
 
     // enforce a happens-before relationship
     // that is: we're sure that the sequence number is incremented before
@@ -52,7 +107,7 @@ template <typename T> struct storage_block {
     // in TSO architectures (such as x86), we can use normal store operations
     // since store-store opreations will always be ordered the same in memory
     // as in the program
-    storage = value;
+    m_storage = value;
 #else
     const storage_type *value_as_storage =
         reinterpret_cast<const storage_type *>(&value);
@@ -64,7 +119,7 @@ template <typename T> struct storage_block {
 
     // now we're sure that the changes in the storage all happens before the
     // change in the sequence number
-    sequence_number.store(sn + 2, std::memory_order_release);
+    m_sequence_number.store(sn + 2, std::memory_order_release);
   }
 
   bool try_load(T *value, uint32_t *read_sequence_number,
@@ -72,7 +127,7 @@ template <typename T> struct storage_block {
 
     do {
       uint32_t sequence_number_before =
-          sequence_number.load(std::memory_order_acquire);
+          m_sequence_number.load(std::memory_order_acquire);
 
       // if the writer is in the middle of writing a new value
       if (sequence_number_before & 1) {
@@ -84,7 +139,7 @@ template <typename T> struct storage_block {
       // in TSO architectures (such as x86), we can use normal load operations
       // since load-load opreations will always be ordered the same in memory
       // as in the program
-      *value = storage;
+      *value = m_storage;
 #else
       storage_type *result_as_storage = reinterpret_cast<storage_type *>(value);
       for (size_t i = 0; i < storage_per_element; i++) {
@@ -104,7 +159,7 @@ template <typename T> struct storage_block {
       std::atomic_thread_fence(std::memory_order_acquire);
 
       uint32_t sequence_number_after =
-          sequence_number.load(std::memory_order_acquire);
+          m_sequence_number.load(std::memory_order_acquire);
 
       if (sequence_number_after == sequence_number_before) {
         *read_sequence_number = sequence_number_after;
@@ -116,8 +171,16 @@ template <typename T> struct storage_block {
     return false;
   }
 
+  uint32_t
+  sequence_number(std::memory_order order = std::memory_order_relaxed) {
+    return m_sequence_number.load(order);
+  }
+
+  void *sequence_number_address() { return &m_sequence_number; }
+
+private:
 #ifdef _BROADCAST_QUEUE_TSO_MODEL
-  T storage;
+  T m_storage;
 #else
   using storage_type = char;
   static constexpr size_t storage_per_element =
@@ -127,7 +190,7 @@ template <typename T> struct storage_block {
   std::atomic<storage_type> storage[storage_per_element];
 #endif
 
-  std::atomic<uint32_t> sequence_number;
+  std::atomic<uint32_t> m_sequence_number;
 };
 
 struct alignas(uint64_t) Cursor {
@@ -163,7 +226,7 @@ public:
 
     auto &block = m_storage_blocks[pos];
 
-    size_t sequence_number = block.sequence_number;
+    size_t sequence_number = block.sequence_number(std::memory_order_relaxed);
 
     // update cursor indicating we're in the middle of writing
     cur.m_sequence_number = sequence_number + 1;
@@ -173,8 +236,8 @@ public:
 
     // update cursor to the next element
     cur.m_pos = (pos + 1) % m_capacity;
-    cur.m_sequence_number = m_storage_blocks[cur.m_pos].sequence_number.load(
-        std::memory_order_relaxed);
+    cur.m_sequence_number =
+        m_storage_blocks[cur.m_pos].sequence_number(std::memory_order_relaxed);
     m_cursor.store(cur, std::memory_order_relaxed);
 
     m_waiter.notify(pos, sequence_number + 2);
@@ -242,8 +305,8 @@ public:
   size_t capacity() { return m_capacity; }
 
   size_t sequence_number(size_t pos,
-                         std::memory_order = std::memory_order_relaxed) {
-    return m_storage_blocks[pos].sequence_number;
+                         std::memory_order order = std::memory_order_relaxed) {
+    return m_storage_blocks[pos].sequence_number(order);
   }
 
   size_t subscribers() { return m_subscribers.load(std::memory_order_relaxed); }

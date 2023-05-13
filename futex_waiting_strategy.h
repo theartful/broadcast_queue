@@ -25,7 +25,7 @@ public:
     long result =
         ::syscall(SYS_futex,
                   static_cast<const void *>(
-                      &m_queue->m_storage_blocks[pos].sequence_number),
+                      m_queue->m_storage_blocks[pos].sequence_number_address()),
                   FUTEX_WAKE, INT_MAX, NULL, NULL, 0);
 
     if (result == -1)
@@ -55,11 +55,11 @@ public:
       if (m_queue->sequence_number(reader_pos) != old_sequence_number)
         return true;
 
-      long result =
-          ::syscall(SYS_futex,
-                    static_cast<const void *>(
-                        &m_queue->m_storage_blocks[reader_pos].sequence_number),
-                    FUTEX_WAIT, old_sequence_number, &timeout_spec, NULL, 0);
+      long result = ::syscall(
+          SYS_futex,
+          static_cast<const void *>(
+              m_queue->m_storage_blocks[reader_pos].sequence_number_address()),
+          FUTEX_WAIT, old_sequence_number, &timeout_spec, NULL, 0);
 
       if (result == -1) {
         switch (errno) {
