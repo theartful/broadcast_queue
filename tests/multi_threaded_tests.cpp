@@ -41,8 +41,7 @@ using MyTypes = ::testing::Types<
     TestTypes<float, broadcast_queue::futex_waiting_strategy>,
     TestTypes<std::array<char, 16>, broadcast_queue::futex_waiting_strategy>,
     TestTypes<std::array<char, 1024>, broadcast_queue::futex_waiting_strategy>,
-    TestTypes<std::array<char, 2048>, broadcast_queue::futex_waiting_strategy>
-    ,
+    TestTypes<std::array<char, 2048>, broadcast_queue::futex_waiting_strategy>,
     TestTypes<int, broadcast_queue::semaphore_waiting_strategy>,
     TestTypes<float, broadcast_queue::semaphore_waiting_strategy>,
     TestTypes<std::array<char, 16>,
@@ -159,5 +158,32 @@ TYPED_TEST(MultiThreaded, LaggedReceiver) {
   }};
 
   sender_thread.join();
+  receiver_thread.join();
+}
+
+TYPED_TEST(MultiThreaded, TimedWait) {
+  broadcast_queue::sender<VALUE_TYPE, WAITER_TYPE> sender{100};
+  broadcast_queue::receiver<VALUE_TYPE, WAITER_TYPE> receiver =
+      sender.subscribe();
+
+  std::atomic<bool> started = false;
+
+  std::thread receiver_thread{[&]() {
+    broadcast_queue::Error error;
+
+    VALUE_TYPE result;
+    started = true;
+    error = receiver.wait_dequeue_timed(&result, std::chrono::seconds(5));
+
+    EXPECT_EQ(error, broadcast_queue::Error::None);
+    EXPECT_EQ(result, new_value<VALUE_TYPE>(123));
+  }};
+
+  while (!started)
+    ;
+
+  std::this_thread::sleep_for(std::chrono::seconds(2));
+  sender.push(new_value<VALUE_TYPE>(123));
+
   receiver_thread.join();
 }
