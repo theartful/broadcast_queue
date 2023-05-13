@@ -75,11 +75,10 @@ int main()
 
 ## Is this queue lock-free?
 
-Depending on the waiting strategy you use. The default strategy uses condition
-variables, which requires locks, but in return we get less cpu usage. But if you
-prefer a lock-free queue, you can use the semaphore waiting strategy, which will
-give better speeds for reading and writing into the queue, but will use more cpu
-time due to the required busy waiting.
+It depends on the waiting strategy employed. The default strategy uses condition
+variables, which requires locks but results in lower CPU usage. Alternatively,
+the semaphore waiting strategy is lock-free with faster read/write speeds, at the
+cost of higher CPU usage due to busy waiting.
 
 ## Use
 
@@ -104,6 +103,8 @@ target_link_libraries(target PUBLIC broadcast_queue)
 
 - [ ] Implement the `semaphore` class on Windows and MacOS.
 - [ ] Support non trivially copyable and non trivially destructible data types.
+- [ ] Try 128-bit atomic intrinsics on x64 architecture to get rid of seqlocks
+in the case when stored data is 64-bit long.
 
 [1]: https://www.hpl.hp.com/techreports/2012/HPL-2012-68.pdf 
 
