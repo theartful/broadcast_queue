@@ -3,7 +3,6 @@
 
 #include <cstdlib>
 #include <ctime>
-#include <semaphore>
 #include <system_error>
 #include <thread>
 #include <vector>
