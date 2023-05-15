@@ -54,7 +54,7 @@ using MyTypes = ::testing::Types<
     TestTypes<float, broadcast_queue::futex_waiting_strategy>,
     TestTypes<std::array<char, 16>, broadcast_queue::futex_waiting_strategy>,
     TestTypes<std::array<char, 1024>, broadcast_queue::futex_waiting_strategy>,
-    TestTypes<std::array<char, 2048>, broadcast_queue::futex_waiting_strategy>,
+    TestTypes<std::array<char, 2048>, broadcast_queue::futex_waiting_strategy>
 #endif
     >;
 template <typename T> class SingleThreaded : public testing::Test {};
