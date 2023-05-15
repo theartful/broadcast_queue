@@ -2,9 +2,9 @@
 #include <gtest/gtest.h>
 
 #include "broadcast_queue.h"
+#include "semaphore_waiting_strategy.h"
 #ifdef __unix__
 #include "futex_waiting_strategy.h"
-#include "semaphore_waiting_strategy.h"
 #endif
 
 template <typename T, template <typename> typename WaitingStrategy>
@@ -26,20 +26,7 @@ using MyTypes = ::testing::Types<
     TestTypes<std::array<char, 16>, broadcast_queue::default_waiting_strategy>,
     TestTypes<std::array<char, 1024>,
               broadcast_queue::default_waiting_strategy>,
-    TestTypes<std::array<char, 2048>, broadcast_queue::default_waiting_strategy>
-
-#ifdef __unix__
-    ,
-    TestTypes<int, broadcast_queue::futex_waiting_strategy>,
-    TestTypes<float, broadcast_queue::futex_waiting_strategy>,
-    TestTypes<std::array<char, 16>, broadcast_queue::futex_waiting_strategy>,
-    TestTypes<std::array<char, 1024>, broadcast_queue::futex_waiting_strategy>,
-    TestTypes<std::array<char, 2048>, broadcast_queue::futex_waiting_strategy>,
-    TestTypes<int, broadcast_queue::futex_waiting_strategy>,
-    TestTypes<float, broadcast_queue::futex_waiting_strategy>,
-    TestTypes<std::array<char, 16>, broadcast_queue::futex_waiting_strategy>,
-    TestTypes<std::array<char, 1024>, broadcast_queue::futex_waiting_strategy>,
-    TestTypes<std::array<char, 2048>, broadcast_queue::futex_waiting_strategy>,
+    TestTypes<std::array<char, 2048>, broadcast_queue::default_waiting_strategy>,
     TestTypes<int, broadcast_queue::semaphore_waiting_strategy>,
     TestTypes<float, broadcast_queue::semaphore_waiting_strategy>,
     TestTypes<std::array<char, 16>,
@@ -56,6 +43,18 @@ using MyTypes = ::testing::Types<
               broadcast_queue::semaphore_waiting_strategy>,
     TestTypes<std::array<char, 2048>,
               broadcast_queue::semaphore_waiting_strategy>
+#ifdef __unix__
+    ,
+    TestTypes<int, broadcast_queue::futex_waiting_strategy>,
+    TestTypes<float, broadcast_queue::futex_waiting_strategy>,
+    TestTypes<std::array<char, 16>, broadcast_queue::futex_waiting_strategy>,
+    TestTypes<std::array<char, 1024>, broadcast_queue::futex_waiting_strategy>,
+    TestTypes<std::array<char, 2048>, broadcast_queue::futex_waiting_strategy>,
+    TestTypes<int, broadcast_queue::futex_waiting_strategy>,
+    TestTypes<float, broadcast_queue::futex_waiting_strategy>,
+    TestTypes<std::array<char, 16>, broadcast_queue::futex_waiting_strategy>,
+    TestTypes<std::array<char, 1024>, broadcast_queue::futex_waiting_strategy>,
+    TestTypes<std::array<char, 2048>, broadcast_queue::futex_waiting_strategy>,
 #endif
     >;
 template <typename T> class SingleThreaded : public testing::Test {};

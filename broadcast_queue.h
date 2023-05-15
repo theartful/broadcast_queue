@@ -17,7 +17,7 @@
 // Hans Bohem (https://www.hpl.hp.com/techreports/2012/HPL-2012-68.pdf)
 
 #if defined(__amd64__) || defined(__x86_64__) || defined(_M_AMD64) ||          \
-    defined(_M_X64)
+    defined(_M_X64) || defined(_M_IX86)
 #define _BROADCAST_QUEUE_TSO_MODEL
 #endif
 
@@ -236,7 +236,7 @@ public:
 
     auto &block = m_storage_blocks[pos];
 
-    size_t sequence_number = block.sequence_number(std::memory_order_relaxed);
+    uint32_t sequence_number = block.sequence_number(std::memory_order_relaxed);
 
     // update cursor indicating we're in the middle of writing
     cur.m_sequence_number = sequence_number + 1;
@@ -314,12 +314,13 @@ public:
   Cursor cursor() { return m_cursor.load(std::memory_order_relaxed); }
   size_t capacity() { return m_capacity; }
 
-  size_t sequence_number(size_t pos,
-                         std::memory_order order = std::memory_order_relaxed) {
+  uint32_t
+  sequence_number(uint32_t pos,
+                  std::memory_order order = std::memory_order_relaxed) {
     return m_storage_blocks[pos].sequence_number(order);
   }
 
-  const storage_block<T> &block(size_t pos) { return m_storage_blocks[pos]; }
+  const storage_block<T> &block(uint32_t pos) { return m_storage_blocks[pos]; }
 
   size_t subscribers() { return m_subscribers.load(std::memory_order_relaxed); }
   void subscribe() { m_subscribers.fetch_add(1, std::memory_order_relaxed); }
@@ -335,7 +336,14 @@ private:
 
   // prevents false sharing between the writer who constantly updates this
   // m_cursor and the readers who constantly read m_storage_blocks
-  alignas(BROADCAST_QUEUE_CACHE_LINE_SIZE) std::atomic<Cursor> m_cursor;
+  // note the usage of double the cache line, which is to combat the prefetcher
+  // which works with pairs of cache lines
+  // alignas(2 * BROADCAST_QUEUE_CACHE_LINE_SIZE) is also a possibility, but it
+  // would change the alignment of the class, and complicate heap allocation
+  // specially in C++11 which doesn't have a standard way for aligned allocation
+  char m_padding[2 * BROADCAST_QUEUE_CACHE_LINE_SIZE];
+
+  std::atomic<Cursor> m_cursor;
 };
 
 } // namespace details

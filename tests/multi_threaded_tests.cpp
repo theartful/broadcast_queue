@@ -1,12 +1,13 @@
-#include "broadcast_queue.h"
 #include <array>
 #include <atomic>
 #include <chrono>
 #include <gtest/gtest.h>
 #include <thread>
+
+#include "broadcast_queue.h"
+#include "semaphore_waiting_strategy.h"
 #ifdef __unix__
 #include "futex_waiting_strategy.h"
-#include "semaphore_waiting_strategy.h"
 #endif
 
 template <typename T, template <typename> typename WaitingStrategy>
@@ -28,20 +29,7 @@ using MyTypes = ::testing::Types<
     TestTypes<std::array<char, 16>, broadcast_queue::default_waiting_strategy>,
     TestTypes<std::array<char, 1024>,
               broadcast_queue::default_waiting_strategy>,
-    TestTypes<std::array<char, 2048>, broadcast_queue::default_waiting_strategy>
-
-#ifdef __unix__
-    ,
-    TestTypes<int, broadcast_queue::futex_waiting_strategy>,
-    TestTypes<float, broadcast_queue::futex_waiting_strategy>,
-    TestTypes<std::array<char, 16>, broadcast_queue::futex_waiting_strategy>,
-    TestTypes<std::array<char, 1024>, broadcast_queue::futex_waiting_strategy>,
-    TestTypes<std::array<char, 2048>, broadcast_queue::futex_waiting_strategy>,
-    TestTypes<int, broadcast_queue::futex_waiting_strategy>,
-    TestTypes<float, broadcast_queue::futex_waiting_strategy>,
-    TestTypes<std::array<char, 16>, broadcast_queue::futex_waiting_strategy>,
-    TestTypes<std::array<char, 1024>, broadcast_queue::futex_waiting_strategy>,
-    TestTypes<std::array<char, 2048>, broadcast_queue::futex_waiting_strategy>,
+    TestTypes<std::array<char, 2048>, broadcast_queue::default_waiting_strategy>,
     TestTypes<int, broadcast_queue::semaphore_waiting_strategy>,
     TestTypes<float, broadcast_queue::semaphore_waiting_strategy>,
     TestTypes<std::array<char, 16>,
@@ -58,6 +46,18 @@ using MyTypes = ::testing::Types<
               broadcast_queue::semaphore_waiting_strategy>,
     TestTypes<std::array<char, 2048>,
               broadcast_queue::semaphore_waiting_strategy>
+#ifdef __unix__
+    ,
+    TestTypes<int, broadcast_queue::futex_waiting_strategy>,
+    TestTypes<float, broadcast_queue::futex_waiting_strategy>,
+    TestTypes<std::array<char, 16>, broadcast_queue::futex_waiting_strategy>,
+    TestTypes<std::array<char, 1024>, broadcast_queue::futex_waiting_strategy>,
+    TestTypes<std::array<char, 2048>, broadcast_queue::futex_waiting_strategy>,
+    TestTypes<int, broadcast_queue::futex_waiting_strategy>,
+    TestTypes<float, broadcast_queue::futex_waiting_strategy>,
+    TestTypes<std::array<char, 16>, broadcast_queue::futex_waiting_strategy>,
+    TestTypes<std::array<char, 1024>, broadcast_queue::futex_waiting_strategy>,
+    TestTypes<std::array<char, 2048>, broadcast_queue::futex_waiting_strategy>,
 #endif
     >;
 
@@ -121,12 +121,12 @@ TYPED_TEST(MultiThreaded, PushThenDequeue) {
 }
 
 TYPED_TEST(MultiThreaded, LaggedReceiver) {
-  broadcast_queue::sender<VALUE_TYPE, WAITER_TYPE> sender{100};
+  broadcast_queue::sender<VALUE_TYPE, WAITER_TYPE> sender{1024};
   broadcast_queue::receiver<VALUE_TYPE, WAITER_TYPE> receiver =
       sender.subscribe();
 
-  std::chrono::microseconds sender_latency{100};
-  std::chrono::microseconds receiver_latency{1000};
+  std::chrono::milliseconds sender_latency{1};
+  std::chrono::milliseconds receiver_latency{10};
 
   std::atomic<bool> should_stop{false};
 
