@@ -1,17 +1,17 @@
 #include <atomic>
-#include <bits/chrono.h>
 #include <chrono>
 #include <stdio.h>
 #include <thread>
 #include <vector>
 
 #include "broadcast_queue.h"
+#include "semaphore_waiting_strategy.h"
+
 #ifdef __unix__
 #include "futex_waiting_strategy.h"
-#include "semaphore_waiting_strategy.h"
 #endif
 
-#include <moodycamel/concurrentqueue.h>
+#include <concurrentqueue.h>
 
 struct BenchResult {
   size_t num_readers;
@@ -122,7 +122,7 @@ void print_results(const BenchResult &results) {
   for (size_t n : results.read_messages)
     tot_read_messages += n;
 
-  printf("duration: \t\t %li millseconds\n", results.duration.count());
+  printf("duration: \t\t %lli millseconds\n", results.duration.count());
   printf("num_readers: \t\t %zu reader\n", results.num_readers);
   printf("written_msgs: \t\t %zu message/sec\n",
          results.written_messages / (results.duration.count() / 1000));
@@ -140,9 +140,8 @@ int main() {
   print_results(run_broadcast_queue_bench(1024, 10, std::chrono::seconds(10)));
   printf("\n");
 
-#ifdef __unix__
   printf("broadcast_queue<semaphore_waiting_strategy>:\n");
-  printf("----------------------------------------\n");
+  printf("-------------------------------------------\n");
   print_results(
       run_broadcast_queue_bench<broadcast_queue::semaphore_waiting_strategy>(
           1024, 1, std::chrono::seconds(10)));
@@ -154,6 +153,7 @@ int main() {
           1024, 10, std::chrono::seconds(10)));
   printf("\n");
 
+#ifdef __unix__
   printf("broadcast_queue<futex_waiting_strategy>:\n");
   printf("----------------------------------------\n");
   print_results(

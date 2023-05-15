@@ -54,7 +54,17 @@ install(
 # testing
 if(BUILD_TESTING)
     enable_testing()
-    find_package(GTest REQUIRED)
+    find_package(GTest)
+    if(NOT GTest_FOUND)
+        include(FetchContent)
+        FetchContent_Declare(
+            googletest
+            URL https://github.com/google/googletest/archive/refs/tags/v1.13.0.zip
+        )
+        # For Windows: Prevent overriding the parent project's compiler/linker settings
+        set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+        FetchContent_MakeAvailable(googletest)
+    endif()
     add_executable(
     tests
         tests/single_threaded_tests.cpp
@@ -65,7 +75,13 @@ if(BUILD_TESTING)
 endif()
 
 if(BUILD_BENCHES)
-    find_package(concurrentqueue)
+    FetchContent_Declare(
+        concurrentqueue
+        GIT_REPOSITORY https://github.com/cameron314/concurrentqueue
+        GIT_TAG master
+    )
+    FetchContent_MakeAvailable(concurrentqueue)
+
     add_executable(messages_per_second benches/messages_per_second.cpp)
-    target_link_libraries(messages_per_second broadcast_queue concurrentqueue::concurrentqueue)
+    target_link_libraries(messages_per_second broadcast_queue concurrentqueue)
 endif()
