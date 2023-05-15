@@ -7,7 +7,7 @@
 #include "broadcast_queue.h"
 #include "semaphore_waiting_strategy.h"
 
-#ifdef __unix__
+#ifdef __linux__
 #include "futex_waiting_strategy.h"
 #endif
 
@@ -153,7 +153,7 @@ int main() {
           1024, 10, std::chrono::seconds(10)));
   printf("\n");
 
-#ifdef __unix__
+#ifdef __linux__
   printf("broadcast_queue<futex_waiting_strategy>:\n");
   printf("----------------------------------------\n");
   print_results(

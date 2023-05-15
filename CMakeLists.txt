@@ -75,6 +75,7 @@ if(BUILD_TESTING)
 endif()
 
 if(BUILD_BENCHES)
+    include(FetchContent)
     FetchContent_Declare(
         concurrentqueue
         GIT_REPOSITORY https://github.com/cameron314/concurrentqueue

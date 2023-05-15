@@ -1,6 +1,6 @@
 #ifndef THEARTFUL_BROADCAST_QUEUE_FUTEX_WAITER
 #define THEARTFUL_BROADCAST_QUEUE_FUTEX_WAITER
-#if __unix__
+#if __linux__
 
 #include <cerrno>
 #include <chrono>

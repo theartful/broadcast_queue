@@ -3,13 +3,14 @@
 
 #include <cstdlib>
 #include <ctime>
+#include <climits>
 #include <system_error>
 #include <thread>
 #include <vector>
-#if __unix__
+#if defined(__linux__)
 #include <semaphore.h>
 #include <time.h>
-#elif _WIN32
+#elif defined(_WIN32) || defined(__MSYS__)
 #include <windows.h>
 #endif
 
@@ -17,7 +18,7 @@
 
 namespace broadcast_queue {
 
-#if __unix__
+#if defined(__linux__)
 class semaphore {
 public:
   semaphore(int initial_value = 0) { sem_init(&m_semaphore, 0, initial_value); }
@@ -100,7 +101,7 @@ public:
 private:
   sem_t m_semaphore;
 };
-#elif defined(_WIN32)
+#elif defined(_WIN32) || defined(__MSYS__)
 class semaphore {
 public:
   semaphore(int initial_value = 0) {
