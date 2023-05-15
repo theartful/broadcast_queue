@@ -223,8 +223,8 @@ public:
   using value_type = T;
 
   queue_data(size_t capacity_)
-      : m_capacity{capacity_}, m_subscribers{0}, m_cursor{Cursor{0, 0}},
-        m_waiter{this} {
+      : m_capacity{capacity_}, m_subscribers{0}, m_closed{false},
+        m_cursor{Cursor{0, 0}}, m_waiter{this} {
 
     // uninititalized storage
     m_storage_blocks = new storage_block<T>[m_capacity];
@@ -256,6 +256,9 @@ public:
   template <typename Rep, typename Period>
   Error read(T *result, uint32_t *reader_pos, uint32_t *reader_sequence_number,
              const std::chrono::duration<Rep, Period> &timeout) {
+
+    if (is_closed())
+      return Error::Closed;
 
     std::chrono::steady_clock::time_point until =
         std::chrono::steady_clock::now() + timeout;
@@ -326,12 +329,16 @@ public:
   void subscribe() { m_subscribers.fetch_add(1, std::memory_order_relaxed); }
   void unsubscribe() { m_subscribers.fetch_sub(1, std::memory_order_relaxed); }
 
+  void close() { m_closed.store(true, std::memory_order_relaxed); }
+  bool is_closed() { return m_closed.load(std::memory_order_relaxed); }
+
   ~queue_data() { delete[] m_storage_blocks; }
 
 private:
   size_t m_capacity;
   std::atomic<size_t> m_subscribers;
   storage_block<T> *m_storage_blocks;
+  std::atomic<bool> m_closed;
   WaitingStrategy m_waiter;
 
   // prevents false sharing between the writer who constantly updates this
@@ -399,11 +406,11 @@ public:
   receiver(std::shared_ptr<queue_data> internal_ = nullptr)
       : m_internal{internal_} {
 
-    if (!internal_)
+    if (!m_internal)
       return;
 
-    internal_->subscribe();
-    m_cursor = internal_->cursor();
+    m_internal->subscribe();
+    m_cursor = m_internal->cursor();
 
     if (m_cursor.m_sequence_number & 1)
       m_cursor.m_sequence_number += 1;
@@ -412,22 +419,18 @@ public:
   }
 
   ~receiver() {
-    std::shared_ptr<queue_data> internal_sptr = m_internal.lock();
-    if (internal_sptr)
-      internal_sptr->unsubscribe();
+    if (m_internal)
+      m_internal->unsubscribe();
   }
 
   template <typename Rep, typename Period>
   Error wait_dequeue_timed(T *result,
                            const std::chrono::duration<Rep, Period> &timeout) {
 
-    std::shared_ptr<queue_data> internal_sptr = m_internal.lock();
-
-    if (!internal_sptr) {
+    if (!m_internal)
       return Error::Closed;
-    }
 
-    return internal_sptr->read(result, &m_cursor, timeout);
+    return m_internal->read(result, &m_cursor, timeout);
   }
 
   Error try_dequeue(T *result) {
@@ -437,7 +440,7 @@ public:
   void reset() { m_internal.reset(); }
 
 private:
-  std::weak_ptr<queue_data> m_internal;
+  std::shared_ptr<queue_data> m_internal;
   details::Cursor m_cursor;
 };
 
@@ -446,18 +449,24 @@ class sender {
   using queue_data = details::queue_data<T, WaitingStrategy>;
 
 public:
-  sender(size_t capacity) : internal{std::make_shared<queue_data>(capacity)} {}
+  sender(size_t capacity)
+      : m_internal{std::make_shared<queue_data>(capacity)} {}
 
-  sender(sender &&other) : internal{std::move(other.internal)} {}
+  sender(sender &&other) : m_internal{std::move(other.m_internal)} {}
 
-  void push(const T &value) { internal->push(value); }
+  void push(const T &value) { m_internal->push(value); }
 
   receiver<T, WaitingStrategy> subscribe() {
-    return receiver<T, WaitingStrategy>(internal);
+    return receiver<T, WaitingStrategy>(m_internal);
+  }
+
+  ~sender() {
+    if (m_internal)
+      m_internal->close();
   }
 
 private:
-  std::shared_ptr<queue_data> internal;
+  std::shared_ptr<queue_data> m_internal;
 };
 
 } // namespace broadcast_queue
