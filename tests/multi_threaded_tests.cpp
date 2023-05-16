@@ -126,7 +126,7 @@ TYPED_TEST(MultiThreaded, LaggedReceiver) {
       sender.subscribe();
 
   std::chrono::milliseconds sender_latency{1};
-  std::chrono::milliseconds receiver_latency{10};
+  std::chrono::milliseconds receiver_latency{100};
 
   std::atomic<bool> should_stop{false};
 
