@@ -40,24 +40,23 @@ static inline int ctz(uint64_t x) {
   }
   return __builtin_ctzll(x);
 #elif defined(_MSC_VER) && defined(_M_IX86)  // x86
-  int result;
+  unsigned long result;
   uint32_t low = x & 0x00000000FFFFFFFF;
-  if (low != 0) {
-    _BitScanForward(&result, low);
-    return result;
+  if (!_BitScanForward(&result, low)) {
+    return static_cast<int>(result);
   }
   uint32_t high = (x & 0xFFFFFFFF00000000) >> 32;
-  _BitScanForward(&result, high);
-  if (!_BitScanForward(&result, x)) {
-    return result + 32;
+  if (!_BitScanForward(&result, high)) {
+      return 64;
+  } else {
+      return static_cast<int>(result) + 32;
   }
-  return result;
 #elif defined(_MSC_VER) && !defined(_M_IX86) // x64
-  int result;
+  unsigned long result;
   if (!_BitScanForward64(&result, x)) {
     return 64;
   }
-  return result;
+  return static_cast<int>(result);
 #else
   return ctz_fallback(x);
 #endif
