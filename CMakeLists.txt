@@ -7,7 +7,13 @@ project(
     LANGUAGES CXX
 )
 
-add_library(${PROJECT_NAME} INTERFACE)
+add_library(
+${PROJECT_NAME} INTERFACE
+    broadcast_queue.h
+    futex_waiting_strategy.h
+    semaphore_waiting_strategy.h
+    bitmap_allocator.h
+)
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
@@ -37,7 +43,11 @@ install(
 )
 
 install(
-    FILES broadcast_queue.h futex_waiting_strategy.h semaphore_waiting_strategy.h
+    FILES
+        broadcast_queue.h
+        futex_waiting_strategy.h
+        semaphore_waiting_strategy.h
+        bitmap_allocator.h
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}"
 )
 
@@ -69,6 +79,7 @@ if(BUILD_TESTING)
     tests
         tests/single_threaded_tests.cpp
         tests/multi_threaded_tests.cpp
+        tests/bitmap_allocator_tests.cpp
     )
     target_link_libraries(tests GTest::gtest_main broadcast_queue)
     gtest_discover_tests(tests)
