@@ -47,25 +47,28 @@ static inline int ctz(uint64_t x) {
   }
   uint32_t high = (x & 0xFFFFFFFF00000000) >> 32;
   if (!_BitScanForward(&result, high)) {
-      return 64;
+    return 64;
   } else {
-      return static_cast<int>(result) + 32;
+    return static_cast<int>(result) + 32;
   }
 #elif defined(_MSC_VER) && !defined(_M_IX86) // x64
   unsigned long result;
   if (!_BitScanForward64(&result, x)) {
     return 64;
+  } else {
+    return static_cast<int>(result);
   }
-  return static_cast<int>(result);
 #else
   return ctz_fallback(x);
 #endif
 }
 
 class bitmap_allocator_storage {
-  static_assert(sizeof(std::atomic<uint64_t>) == sizeof(uint64_t));
+  static_assert(sizeof(std::atomic<uint64_t>) == sizeof(uint64_t),
+                "Expected sizeof(std::atomic<uint64_t>) == sizeof(uint64_t)");
 #ifdef __cpp_lib_atomic_is_always_lock_free
-  static_assert(std::atomic<uint64_t>::is_always_lock_free);
+  static_assert(std::atomic<uint64_t>::is_always_lock_free,
+                "Expected std::atomic<uint64_t> to be always lock-free");
 #endif
 
 public:
@@ -177,7 +180,7 @@ public:
     // operator does not."
     // see: https://en.cppreference.com/w/cpp/utility/functional/less_equal
     return std::greater_equal<void *>{}(block, static_cast<void *>(m_blocks)) &&
-           std::less_equal<void *>{}(
+           std::less<void *>{}(
                block,
                static_cast<void *>(m_blocks + m_block_size * m_capacity));
   }
@@ -260,10 +263,12 @@ private:
 #endif
 };
 
-template <typename T,
-          template <class> typename FallbackAllocator = std::allocator>
+template <typename T, typename FallbackAllocator = std::allocator<T>>
 class bitmap_allocator {
-  template <typename, template <class> typename> friend class bitmap_allocator;
+  template <typename, typename> friend class bitmap_allocator;
+
+  static_assert(std::is_same<typename FallbackAllocator::value_type, T>::value,
+                "The fallback allocator doesn't operate on the same type");
 
 public:
   using value_type = T;
@@ -272,29 +277,31 @@ public:
   using pointer = T *;
   using const_pointer = const T *;
   using state_type = bitmap_allocator_storage;
-  using fallback_allocator_type = FallbackAllocator<T>;
+  using fallback_allocator_type = FallbackAllocator;
 
   template <typename U> struct rebind {
-    using other = bitmap_allocator<U, FallbackAllocator>;
+    using other = bitmap_allocator<
+        U, typename std::allocator_traits<
+               fallback_allocator_type>::template rebind_alloc<U>>;
   };
 
   bitmap_allocator(state_type *state_) : state{state_} {}
 
-  template <typename U, template <class> typename Alloc>
+  template <typename U, typename Alloc>
   bitmap_allocator(const bitmap_allocator<U, Alloc> &other)
       : state{other.state}, fallback_allocator{other.fallback_allocator} {}
 
-  template <typename U, template <class> typename Alloc>
+  template <typename U, typename Alloc>
   bitmap_allocator(bitmap_allocator<U, Alloc> &&other)
       : state{other.state}, fallback_allocator{other.fallback_allocator} {}
 
-  template <typename U, template <class> typename Alloc>
+  template <typename U, typename Alloc>
   bitmap_allocator &operator=(bitmap_allocator<U, Alloc> &&other) {
     state = other.state;
     fallback_allocator = other.fallback_allocator;
   }
 
-  template <typename U, template <class> typename Alloc>
+  template <typename U, typename Alloc>
   bitmap_allocator &operator=(const bitmap_allocator<U, Alloc> &other) {
     state = other.state;
     fallback_allocator = other.fallback_allocator;
@@ -339,8 +346,6 @@ public:
       }
     }
   }
-
-  void destroy(pointer p) { std::destroy_at(p); }
 
 private:
   pointer fallback_allocate(size_type n) {

@@ -63,7 +63,6 @@ TYPED_TEST(BitmapAllocator, BasicOperation) {
   EXPECT_EQ(storage.num_allocated(), 1024);
   check_list_mirror_equality();
 
-
   std::random_device rd;
   std::mt19937 prng{rd()};
 
