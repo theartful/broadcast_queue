@@ -161,6 +161,9 @@ public:
   ~bitmap_allocator_storage() { delete[] m_storage; }
 
   void *allocate_block() {
+    // TODO: we can use some sort of heuristic that would do better than blindly
+    // traversing the whole bitmap each time we allocate
+
     // we only try one pass
     for (size_t i = 0; i < m_bitmap_size; i++) {
       void *ptr = try_allocate(i);
@@ -179,6 +182,8 @@ public:
     // implementation-defined strict total order, even if the built-in <=
     // operator does not."
     // see: https://en.cppreference.com/w/cpp/utility/functional/less_equal
+    // now any sane implementation of this would enforce this total ordering
+    // using the actual pointer address in the flat memory
     return std::greater_equal<void *>{}(block, static_cast<void *>(m_blocks)) &&
            std::less<void *>{}(
                block,
@@ -189,7 +194,7 @@ public:
     if (!is_one_of_ours(block))
       return false;
 
-    // now we're sure that we allocated block
+    // now we're sure that we did allocate this block
     size_t idx = std::distance(m_blocks, static_cast<unsigned char *>(block)) /
                  m_block_size;
 

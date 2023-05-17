@@ -10,7 +10,7 @@
 #include "futex_waiting_strategy.h"
 #endif
 
-template <typename T, template <typename> typename WaitingStrategy>
+template <typename T, template <typename> class WaitingStrategy>
 struct TestTypes {
   using value_type = T;
   using waiting_strategy = WaitingStrategy<T>;
@@ -29,7 +29,8 @@ using MyTypes = ::testing::Types<
     TestTypes<std::array<char, 16>, broadcast_queue::default_waiting_strategy>,
     TestTypes<std::array<char, 1024>,
               broadcast_queue::default_waiting_strategy>,
-    TestTypes<std::array<char, 2048>, broadcast_queue::default_waiting_strategy>,
+    TestTypes<std::array<char, 2048>,
+              broadcast_queue::default_waiting_strategy>,
     TestTypes<int, broadcast_queue::semaphore_waiting_strategy>,
     TestTypes<float, broadcast_queue::semaphore_waiting_strategy>,
     TestTypes<std::array<char, 16>,
@@ -166,7 +167,7 @@ TYPED_TEST(MultiThreaded, TimedWait) {
   broadcast_queue::receiver<VALUE_TYPE, WAITER_TYPE> receiver =
       sender.subscribe();
 
-  std::atomic<bool> started = false;
+  std::atomic<bool> started{false};
 
   std::thread receiver_thread{[&]() {
     broadcast_queue::Error error;

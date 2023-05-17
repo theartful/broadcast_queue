@@ -104,7 +104,7 @@ target_link_libraries(target PUBLIC broadcast_queue)
 - [x] Implement the `semaphore` class on Windows.
 - [ ] Implement the `semaphore` class on macOS.
 - [ ] Support non trivially copyable and non trivially destructible data types:
-    - [ ] Implement a lock-free bitmap allocator.
+    - [x] Implement a lock-free bitmap allocator.
     - [ ] Implement a two-layer broadcast-queue, the first layer would consist
     of pointers employing the same strategy already used, and the second layer
     would contain the actual data, which would be allocated using the

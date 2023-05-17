@@ -21,7 +21,7 @@ struct BenchResult {
 };
 
 template <template <typename>
-          typename WaitingStrategy = broadcast_queue::default_waiting_strategy>
+          class WaitingStrategy = broadcast_queue::default_waiting_strategy>
 BenchResult run_broadcast_queue_bench(size_t capacity, size_t num_readers,
                                       std::chrono::milliseconds duration) {
   broadcast_queue::sender<uint64_t, WaitingStrategy<uint64_t>> sender(capacity);

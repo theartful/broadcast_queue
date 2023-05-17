@@ -224,7 +224,7 @@ public:
 
   queue_data(size_t capacity_)
       : m_capacity{capacity_}, m_subscribers{0}, m_closed{false},
-        m_cursor{Cursor{0, 0}}, m_waiter{this} {
+        m_waiter{this}, m_cursor{Cursor{0, 0}} {
 
     // uninititalized storage
     m_storage_blocks = new storage_block<T>[m_capacity];
@@ -379,7 +379,7 @@ public:
     if (block.sequence_number() == old_sequence_number) {
       std::unique_lock<std::mutex> lock{m_mutex};
       return m_cv.wait_for(
-          lock, timeout, [&block, reader_pos, old_sequence_number]() {
+          lock, timeout, [&block, old_sequence_number]() {
             // the condition variable is on m_cursor not on the sequence
             // numbers, but if the cursor has gone over `pos` then it has to
             // have updated the sequence number before changing the cursor value
