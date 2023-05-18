@@ -82,19 +82,17 @@ public:
       : m_block_size{block_size}, m_block_alignment{block_alignment},
         m_capacity{capacity} {
 
+    // make capacity a multiple of 64
+    m_capacity += (64 - m_capacity % 64) % 64;
+    assert(m_capacity % 64 == 0);
+
     // every element occupies one bit
     m_bitmap_size = m_capacity / 64;
-
-    // add the remaining elements
-    if (m_capacity % 64 != 0)
-      m_bitmap_size++;
-
-    assert(m_bitmap_size * 64 >= m_capacity);
+    assert(m_bitmap_size * 64 == m_capacity);
 
     // block size has to be a multiple of the alignment
     m_block_size += (m_block_alignment - m_block_size % m_block_alignment) %
                     m_block_alignment;
-
     assert(m_block_size % m_block_alignment == 0);
 
     size_t storage_size = alignof(std::atomic<uint64_t>) +
@@ -143,6 +141,9 @@ public:
     m_storage = other.m_storage;
     m_bitmap = other.m_bitmap;
     m_blocks = other.m_blocks;
+#ifdef BITMAP_ALLOCATOR_DEBUG
+    m_num_allocated.store(other.m_num_allocated.load());
+#endif
 
     other.m_capacity = 0;
     other.m_storage = nullptr;
@@ -352,6 +353,8 @@ public:
     }
   }
 
+  size_type max_size() { return 1; }
+
 private:
   pointer fallback_allocate(size_type n) {
     return fallback_allocator.allocate(n);
@@ -364,6 +367,22 @@ private:
 private:
   state_type *state;
   fallback_allocator_type fallback_allocator;
+};
+
+template <typename T> class null_allocator {
+public:
+  using value_type = T;
+  using size_type = size_t;
+  using difference_type = std::ptrdiff_t;
+  using pointer = T *;
+  using const_pointer = const T *;
+
+  null_allocator() {}
+  template <typename U> null_allocator(const null_allocator<U> &) {}
+  template <typename U> null_allocator(null_allocator<U> &&) {}
+
+  pointer allocate(size_type n) { return nullptr; }
+  void deallocate(pointer p, size_type n) {}
 };
 
 } // namespace broadcast_queue

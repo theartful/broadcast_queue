@@ -1,4 +1,4 @@
-# A single-producer, multiple-consumer broadcast queue for POD datatypes for C++11
+# A single-producer, multiple-consumer broadcast queue for C++11
 
 This repository contains an implementation of a fixed-size seqlock broadcast queue
 based on the paper [Can Seqlocks Get Along With Programming Language Memory Models?][1]
@@ -82,9 +82,7 @@ cost of higher CPU usage due to busy waiting.
 
 ## Use
 
-Just copy "broadcast_queue.h" into your application and you're good to go.
-
-Alternatively, you can use CMake by adding these lines into your CMakeLists.txt file:
+Add the following lines to your CMakeLists.txt file:
 ```cmake
 include(FetchContent)
 
@@ -103,9 +101,9 @@ target_link_libraries(target PUBLIC broadcast_queue)
 
 - [x] Implement the `semaphore` class on Windows.
 - [ ] Implement the `semaphore` class on macOS.
-- [ ] Support non trivially copyable and non trivially destructible data types:
+- [x] Support non trivially copyable and non trivially destructible data types:
     - [x] Implement a lock-free bitmap allocator.
-    - [ ] Implement a two-layer broadcast-queue, the first layer would consist
+    - [x] Implement a two-layer broadcast-queue, the first layer would consist
     of pointers employing the same strategy already used, and the second layer
     would contain the actual data, which would be allocated using the
     aforementioned lock-free bitmap allocator.

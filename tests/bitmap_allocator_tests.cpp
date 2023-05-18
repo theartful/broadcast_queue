@@ -1,12 +1,12 @@
+#define BITMAP_ALLOCATOR_DEBUG
+
 #include <gtest/gtest.h>
 
+#include "bitmap_allocator.h"
 #include <array>
 #include <chrono>
 #include <random>
 #include <thread>
-
-#define BITMAP_ALLOCATOR_DEBUG
-#include "bitmap_allocator.h"
 
 template <int Alignment, int Size> struct alignas(Alignment) AlignedStruct {
   std::array<char, Size> data;
@@ -16,10 +16,11 @@ template <int Alignment, int Size> struct alignas(Alignment) AlignedStruct {
   }
 };
 
-using MyTypes = ::testing::Types<float, double, std::array<char, 128>,
-                                 std::array<char, 256>, std::array<char, 512>,
-                                 AlignedStruct<16, 1>, AlignedStruct<32, 8>,
-                                 AlignedStruct<1, 16>, AlignedStruct<8, 32>>;
+using MyTypes =
+    ::testing::Types<float, double, std::array<char, 128>,
+                     std::array<char, 256>, std::array<char, 512>,
+                     AlignedStruct<16, 1>, AlignedStruct<32, 8>,
+                     AlignedStruct<1, 16>, AlignedStruct<8, 32>, std::string>;
 
 template <typename T> class BitmapAllocator : public testing::Test {};
 
@@ -41,8 +42,11 @@ template <typename T> T new_value(int idx) {
       cur_bytes_idx = 0;
     }
   }
-
   return data;
+}
+
+template <> inline std::string new_value<std::string>(int idx) {
+  return std::string("string number: ") + std::to_string(idx);
 }
 
 template <typename T, typename Alloc> T *allocate_and_construct(Alloc alloc) {

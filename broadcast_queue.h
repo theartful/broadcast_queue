@@ -5,10 +5,13 @@
 #include <chrono>             // for time
 #include <condition_variable> // for condition variables obviously
 #include <cstdint>            // for int types
+#include <cstring>            // for memcpy
 #include <memory>             // for smart pointers
 #include <mutex>              // for mutexes obviously
 #include <thread>             // for yielding the thread
 #include <type_traits>        // for all sorts of type operations
+
+#include "bitmap_allocator.h"
 
 // implements a fixed-size single producer multiple consumer fan-out circular
 // queue of POD structs where new data is sent to all consumers.
@@ -22,13 +25,7 @@
 #endif
 
 #ifndef BROADCAST_QUEUE_CACHE_LINE_SIZE
-#ifdef __cpp_lib_hardware_interference_size
-#include <new>
-#define BROADCAST_QUEUE_CACHE_LINE_SIZE                                        \
-  std::hardware_destructive_interference_size
-#else
 #define BROADCAST_QUEUE_CACHE_LINE_SIZE 64
-#endif
 #endif
 
 namespace broadcast_queue {
@@ -56,9 +53,10 @@ template <typename T> static constexpr bool is_always_lock_free() {
 #endif
 }
 
-template <typename T, typename = void> class storage_block;
+template <typename T, typename = void> class storage_block {};
 
-template <typename T, typename WaitingStrategy> class queue_data;
+template <typename T, typename WaitingStrategy, typename = void>
+class queue_data {};
 
 template <typename T>
 class storage_block<T, typename std::enable_if<is_always_lock_free<
@@ -80,6 +78,14 @@ public:
     *read_sequence_number = old_storage.sequence_number;
 
     return true;
+  }
+
+  void load_nosync(T *value) const {
+    *value = m_storage.load(std::memory_order_relaxed).value;
+  }
+
+  void store_nosync(const T &value) {
+    m_storage.store(value, std::memory_order_relaxed);
   }
 
   uint32_t
@@ -153,7 +159,7 @@ public:
 #else
       storage_type *result_as_storage = reinterpret_cast<storage_type *>(value);
       for (size_t i = 0; i < storage_per_element; i++) {
-        result_as_storage[i] = storage[i].load(std::memory_order_relaxed);
+        result_as_storage[i] = m_storage[i].load(std::memory_order_relaxed);
       }
 #endif
 
@@ -181,6 +187,14 @@ public:
     return false;
   }
 
+  void load_nosync(T *value) const {
+    std::memcpy((void *)value, (void *)&m_storage, sizeof(T));
+  }
+
+  void store_nosync(const T &value) {
+    std::memcpy((void *)&m_storage, (void *)&value, sizeof(T));
+  }
+
   uint32_t
   sequence_number(std::memory_order order = std::memory_order_relaxed) const {
     return m_sequence_number.load(order);
@@ -197,30 +211,34 @@ private:
       sizeof(T) / sizeof(storage_type);
   static_assert(sizeof(T) % sizeof(storage_type) == 0,
                 "storage_type has to have size multiple of the size of T");
-  std::atomic<storage_type> storage[storage_per_element];
+  std::atomic<storage_type> m_storage[storage_per_element];
 #endif
 
   std::atomic<uint32_t> m_sequence_number;
 };
 
 struct alignas(uint64_t) Cursor {
-  uint32_t m_pos;             // the position the writer will write on next
-  uint32_t m_sequence_number; // the sequence number of the element on which the
-                              // writer will write on next
+  uint32_t pos;             // the position the writer will write on next
+  uint32_t sequence_number; // the sequence number of the element on which the
+                            // writer will write on next
 };
 
-template <typename T, typename WaitingStrategy> class queue_data {
+// we don't really check for "podness" but this naming is short and sweet
+template <typename T> struct is_pod {
+  static constexpr bool value = std::is_trivially_copyable<T>::value &&
+                                std::is_trivially_destructible<T>::value;
+};
+
+template <typename T, typename WaitingStrategy>
+class queue_data<T, WaitingStrategy,
+                 typename std::enable_if<is_pod<T>::value>::type> {
 
   friend WaitingStrategy;
 
-  static_assert(std::is_trivially_copyable<T>::value,
-                "Type T of broadcast_queue has to be trivially copyable!");
-
-  static_assert(std::is_trivially_destructible<T>::value,
-                "Type T of broadcast_queue has to be trivially destructible!");
-
 public:
   using value_type = T;
+  using pointer = T *;
+  using waiting_strategy = WaitingStrategy;
 
   queue_data(size_t capacity_)
       : m_capacity{capacity_}, m_subscribers{0}, m_closed{false},
@@ -230,31 +248,32 @@ public:
     m_storage_blocks = new storage_block<T>[m_capacity];
   }
 
-  void push(const T &value) {
+  void push(const value_type &value) {
     Cursor cur = m_cursor.load(std::memory_order_relaxed);
-    uint32_t pos = cur.m_pos;
+    uint32_t pos = cur.pos;
 
     auto &block = m_storage_blocks[pos];
 
     uint32_t sequence_number = block.sequence_number(std::memory_order_relaxed);
 
     // update cursor indicating we're in the middle of writing
-    cur.m_sequence_number = sequence_number + 1;
+    cur.sequence_number = sequence_number + 1;
     m_cursor.store(cur, std::memory_order_relaxed);
 
     block.store(value);
 
     // update cursor to the next element
-    cur.m_pos = (pos + 1) % m_capacity;
-    cur.m_sequence_number =
-        m_storage_blocks[cur.m_pos].sequence_number(std::memory_order_relaxed);
+    cur.pos = (pos + 1) % m_capacity;
+    cur.sequence_number =
+        m_storage_blocks[cur.pos].sequence_number(std::memory_order_relaxed);
     m_cursor.store(cur, std::memory_order_relaxed);
 
     m_waiter.notify(pos, sequence_number + 2);
   }
 
   template <typename Rep, typename Period>
-  Error read(T *result, uint32_t *reader_pos, uint32_t *reader_sequence_number,
+  Error read(pointer result, uint32_t *reader_pos,
+             uint32_t *reader_sequence_number,
              const std::chrono::duration<Rep, Period> &timeout) {
 
     if (is_closed())
@@ -277,8 +296,8 @@ public:
         Cursor cur = m_cursor.load(std::memory_order_relaxed);
 
         // lagging will effectively cause resubscription
-        *reader_pos = cur.m_pos;
-        *reader_sequence_number = cur.m_sequence_number;
+        *reader_pos = cur.pos;
+        *reader_sequence_number = cur.sequence_number;
         if (*reader_sequence_number & 1)
           *reader_sequence_number += 1;
         else
@@ -309,13 +328,10 @@ public:
   }
 
   template <typename Rep, typename Period>
-  Error read(T *result, Cursor *cursor,
+  Error read(pointer result, Cursor *cursor,
              const std::chrono::duration<Rep, Period> &timeout) {
-    return read(result, &cursor->m_pos, &cursor->m_sequence_number, timeout);
+    return read(result, &cursor->pos, &cursor->sequence_number, timeout);
   }
-
-  Cursor cursor() { return m_cursor.load(std::memory_order_relaxed); }
-  size_t capacity() { return m_capacity; }
 
   uint32_t
   sequence_number(uint32_t pos,
@@ -323,12 +339,20 @@ public:
     return m_storage_blocks[pos].sequence_number(order);
   }
 
-  const storage_block<T> &block(uint32_t pos) { return m_storage_blocks[pos]; }
+  const storage_block<value_type> &block(uint32_t pos) const {
+    return m_storage_blocks[pos];
+  }
 
+  // I know we can const overload, but I don't like it
+  storage_block<value_type> &block_nonconst(uint32_t pos) {
+    return m_storage_blocks[pos];
+  }
+
+  Cursor cursor() { return m_cursor.load(std::memory_order_relaxed); }
+  size_t capacity() { return m_capacity; }
   size_t subscribers() { return m_subscribers.load(std::memory_order_relaxed); }
   void subscribe() { m_subscribers.fetch_add(1, std::memory_order_relaxed); }
   void unsubscribe() { m_subscribers.fetch_sub(1, std::memory_order_relaxed); }
-
   void close() { m_closed.store(true, std::memory_order_relaxed); }
   bool is_closed() { return m_closed.load(std::memory_order_relaxed); }
 
@@ -336,10 +360,10 @@ public:
 
 private:
   size_t m_capacity;
+  storage_block<value_type> *m_storage_blocks;
   std::atomic<size_t> m_subscribers;
-  storage_block<T> *m_storage_blocks;
   std::atomic<bool> m_closed;
-  WaitingStrategy m_waiter;
+  waiting_strategy m_waiter;
 
   // prevents false sharing between the writer who constantly updates this
   // m_cursor and the readers who constantly read m_storage_blocks
@@ -353,12 +377,225 @@ private:
   std::atomic<Cursor> m_cursor;
 };
 
+template <typename T> struct nonpod_storage_block {
+  T value;
+  std::atomic<uint64_t> sequence_number;
+  std::atomic<uint64_t> refcount;
+};
+
+template <typename T, typename WaitingStrategy>
+class queue_data<T, WaitingStrategy,
+                 typename std::enable_if<!is_pod<T>::value>::type> {
+public:
+  using value_type = T;
+  using pointer = T *;
+  using waiting_strategy = WaitingStrategy;
+  using allocator =
+      bitmap_allocator<nonpod_storage_block<value_type>,
+                       null_allocator<nonpod_storage_block<value_type>>>;
+  using allocator_storage = bitmap_allocator_storage;
+
+  queue_data(size_t capacity)
+      : m_internal_queue{capacity},
+        m_storage{
+            bitmap_allocator_storage::create<nonpod_storage_block<value_type>>(
+                capacity * 2)},
+        m_allocator{&m_storage} {
+
+    for (size_t i = 0; i < m_internal_queue.capacity(); i++) {
+      m_internal_queue.block_nonconst(i).store_nosync(nullptr);
+    }
+  }
+
+  ~queue_data() {
+    // go over each block and destroy the value inside
+    // even though we have 2 * capacity allocated values, at the end only
+    // `capacity` items will be alive, since the others are only extra in the
+    // case a reader locks a block, and once the reader is finished, the item
+    // will be destroyed
+    for (size_t i = 0; i < m_internal_queue.capacity(); i++) {
+      nonpod_storage_block<value_type> *block_ptr;
+      m_internal_queue.block(i).load_nosync(&block_ptr);
+      if (block_ptr)
+        std::allocator_traits<allocator>::destroy(m_allocator, block_ptr);
+    }
+  }
+
+  void push(const value_type &value) {
+    nonpod_storage_block<value_type> *block = reconstruct(next_block(), value);
+    m_internal_queue.push(block);
+  }
+
+  template <typename Rep, typename Period>
+  Error read(pointer result, Cursor *cursor,
+             const std::chrono::duration<Rep, Period> &timeout) {
+    nonpod_storage_block<value_type> *block;
+
+    auto old_sequence_number = cursor->sequence_number;
+    Error error = m_internal_queue.read(&block, cursor, timeout);
+
+    if (error != Error::None)
+      return error;
+
+    auto refcount = block->refcount.load(std::memory_order_relaxed);
+    // the block died from underneath us!
+    if (refcount == 0) {
+      return Error::Timeout;
+    }
+
+    // try to increment refcount so that no one will dare destroy the object
+    // while we're reading it!
+    while (!block->refcount.compare_exchange_weak(refcount, refcount + 1,
+                                                  std::memory_order_relaxed)) {
+      // the block died from underneath us!
+      if (refcount == 0) {
+        return Error::Timeout;
+      }
+    }
+
+    // check the sequence number once more, since the writer might have rewrote
+    // on the block from the time we read the block pointer until the time we
+    // successfully locked the block
+    if (block->sequence_number != old_sequence_number) {
+      // we decrement the refcount to unlock the block
+      refcount = block->refcount.fetch_sub(1, std::memory_order_relaxed);
+
+      // the last one that uses a block has to deallocate it
+      if (refcount == 0) {
+        destroy_and_deallocate_block(block);
+      }
+
+      return Error::Lagged;
+    }
+
+    // okay, we've locked the block and we made sure that it has the sequence
+    // number we want, now we copy the value
+    *result = block->value;
+
+    // we decrement the refcount to unlock the block, and we set the memory
+    // order to release to make sure that the copy constructor finished copying
+    // before we decrement the refcount
+    auto old_refcount = block->refcount.fetch_sub(1, std::memory_order_release);
+
+    // the last one that uses a block has to deallocate it
+    if (old_refcount == 1) {
+      destroy_and_deallocate_block(block);
+    }
+
+    return Error::None;
+  }
+
+  Cursor cursor() { return m_internal_queue.cursor(); }
+  size_t capacity() { return m_internal_queue.capacity(); }
+  size_t subscribers() { return m_internal_queue.subscribers(); }
+  void subscribe() { m_internal_queue.subscribe(); }
+  void unsubscribe() { m_internal_queue.unsubscribe(); }
+  void close() { m_internal_queue.close(); }
+  bool is_closed() { return m_internal_queue.is_closed(); }
+
+private:
+  nonpod_storage_block<value_type> *next_block() {
+    // get the data the cursor is pointing at
+    auto cursor = m_internal_queue.cursor();
+    // we  don't need to synchronize since we're the only writer
+    nonpod_storage_block<value_type> *block_ptr;
+    m_internal_queue.block(cursor.pos).load_nosync(&block_ptr);
+
+    // this means that this memory block is unallocated yet
+    if (!block_ptr ||
+        block_ptr->refcount.load(std::memory_order_relaxed) == 0) {
+      // we're sure that the allocation will succeed, since we already found
+      // an unallocated block, and we're the only ones doing allocations
+      return std::allocator_traits<allocator>::allocate(m_allocator, 1);
+    } else {
+      // refcount is greater than 0
+      // the writer is responsible for an increment, so we decrement it to
+      // indicate that the writer is done caring about this block
+      auto old_refcount =
+          block_ptr->refcount.fetch_sub(1, std::memory_order_relaxed);
+
+      // life is good, nobody cares about this block anymore
+      // so we destroy the value inside, and reuse the block
+      if (old_refcount == 1) {
+        block_ptr->value.~value_type();
+        return block_ptr;
+      }
+      // one of the readers is holding us back and keeping the refcount up
+      // so we ignore this block and find another
+      else {
+        nonpod_storage_block<value_type> *new_block;
+        // repeatedly try to allocate a new block
+        // the allocation might fail in the extremely rare case that there
+        // are a ton of readers each one locking a block, so we just wait until
+        // one of them finishes
+        // some other solutions include:
+        // 1. using the waiting strategy to wait
+        // 2. augmenting the bitmap allocator so that it would allocate extra
+        //    space when it is full so that it cannot fail
+        while ((new_block = std::allocator_traits<allocator>::allocate(
+                    m_allocator, 1)) == nullptr) {
+          std::this_thread::yield();
+        }
+
+        return new_block;
+      }
+    }
+  }
+
+  nonpod_storage_block<value_type> *
+  reconstruct(nonpod_storage_block<value_type> *block,
+              const value_type &value) {
+    auto cursor = m_internal_queue.cursor();
+
+    // we don't construct since we want to keep the value inside the block
+    // uninititalized
+    // std::allocator_traits<allocator>::construct(m_allocator, block);
+
+    // the refcount should already be set to 0, but just to be safe
+    block->refcount = 0;
+    // it's not really necessary to set the sequence number to an odd value
+    // but just to be safe
+    block->sequence_number = cursor.sequence_number + 1;
+
+    // constructors may do all sorts of crazy things!
+    ::new (&block->value) value_type{value};
+
+    block->sequence_number = cursor.sequence_number + 2;
+
+    // with the reference counter set to a positive value, this block is
+    // considered valid and up to speed
+    block->refcount = 1;
+
+    return block;
+  }
+
+  void destroy_and_deallocate_block(nonpod_storage_block<value_type> *block) {
+    std::allocator_traits<allocator>::destroy(m_allocator, block);
+    std::allocator_traits<allocator>::deallocate(m_allocator, block, 1);
+  }
+
+private:
+  // FIXME: the type looks horrible, think about organizing the waiting strategy
+  // in a prettier way
+  queue_data<nonpod_storage_block<value_type> *,
+             typename waiting_strategy::template rebind<
+                 nonpod_storage_block<value_type> *>::other>
+      m_internal_queue;
+
+  allocator_storage m_storage;
+  allocator m_allocator;
+};
+
 } // namespace details
-  //
+
 template <typename T> class condition_variable_waiting_strategy {
   using self = condition_variable_waiting_strategy<T>;
 
 public:
+  template <typename U> struct rebind {
+    using other = condition_variable_waiting_strategy<U>;
+  };
+
   condition_variable_waiting_strategy(details::queue_data<T, self> *queue)
       : m_queue{queue} {}
 
@@ -378,13 +615,12 @@ public:
     // wait until m_cursor is updated
     if (block.sequence_number() == old_sequence_number) {
       std::unique_lock<std::mutex> lock{m_mutex};
-      return m_cv.wait_for(
-          lock, timeout, [&block, old_sequence_number]() {
-            // the condition variable is on m_cursor not on the sequence
-            // numbers, but if the cursor has gone over `pos` then it has to
-            // have updated the sequence number before changing the cursor value
-            return block.sequence_number() != old_sequence_number;
-          });
+      return m_cv.wait_for(lock, timeout, [&block, old_sequence_number]() {
+        // the condition variable is on m_cursor not on the sequence
+        // numbers, but if the cursor has gone over `pos` then it has to
+        // have updated the sequence number before changing the cursor value
+        return block.sequence_number() != old_sequence_number;
+      });
     }
     return true;
   }
@@ -412,10 +648,10 @@ public:
     m_internal->subscribe();
     m_cursor = m_internal->cursor();
 
-    if (m_cursor.m_sequence_number & 1)
-      m_cursor.m_sequence_number += 1;
+    if (m_cursor.sequence_number & 1)
+      m_cursor.sequence_number += 1;
     else
-      m_cursor.m_sequence_number += 2;
+      m_cursor.sequence_number += 2;
   }
 
   ~receiver() {

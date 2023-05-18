@@ -20,14 +20,37 @@ struct BenchResult {
   std::chrono::milliseconds duration;
 };
 
-template <template <typename>
-          class WaitingStrategy = broadcast_queue::default_waiting_strategy>
+using namespace broadcast_queue;
+
+// pretty much std::iota
+template <typename T> T new_value(int idx) {
+  T data;
+  char *ptr = (char *)&data;
+  int cur = idx;
+  char *cur_bytes = (char *)(&cur);
+  int cur_bytes_idx = 0;
+
+  for (int i = 0; i < sizeof(data); i++) {
+    ptr[i] = cur_bytes[cur_bytes_idx++];
+
+    if (cur_bytes_idx == sizeof(cur)) {
+      cur++;
+      cur_bytes_idx = 0;
+    }
+  }
+  return data;
+}
+
+template <> inline std::string new_value<std::string>(int idx) {
+  return std::string("string number: ") + std::to_string(idx);
+}
+template <template <typename> class WaitingStrategy = default_waiting_strategy,
+          typename T = uint64_t>
 BenchResult run_broadcast_queue_bench(size_t capacity, size_t num_readers,
                                       std::chrono::milliseconds duration) {
-  broadcast_queue::sender<uint64_t, WaitingStrategy<uint64_t>> sender(capacity);
+  sender<T, WaitingStrategy<T>> sender(capacity);
 
-  std::vector<broadcast_queue::receiver<uint64_t, WaitingStrategy<uint64_t>>>
-      receivers;
+  std::vector<receiver<T, WaitingStrategy<T>>> receivers;
   receivers.reserve(num_readers);
 
   for (size_t i = 0; i < num_readers; i++) {
@@ -40,7 +63,7 @@ BenchResult run_broadcast_queue_bench(size_t capacity, size_t num_readers,
 
   std::thread sender_thread{[&]() {
     while (!should_stop) {
-      sender.push(written_messages++);
+      sender.push(new_value<T>(written_messages++));
     }
   }};
 
@@ -54,11 +77,11 @@ BenchResult run_broadcast_queue_bench(size_t capacity, size_t num_readers,
       auto &receiver = receivers[i];
 
       while (!should_stop) {
-        broadcast_queue::Error error;
-        uint64_t msg;
+        Error error;
+        T msg;
 
         error = receiver.try_dequeue(&msg);
-        if (error == broadcast_queue::Error::None)
+        if (error == Error::None)
           read_messages[i]++;
       }
     }});
@@ -75,10 +98,11 @@ BenchResult run_broadcast_queue_bench(size_t capacity, size_t num_readers,
   return BenchResult{num_readers, written_messages, read_messages, duration};
 }
 
+template <typename T = uint64_t>
 BenchResult run_moody_bench(size_t capacity, size_t num_readers,
                             std::chrono::milliseconds duration) {
 
-  moodycamel::ConcurrentQueue<uint64_t> queue{capacity};
+  moodycamel::ConcurrentQueue<T> queue{capacity};
 
   std::atomic<bool> should_stop{false};
 
@@ -86,7 +110,7 @@ BenchResult run_moody_bench(size_t capacity, size_t num_readers,
 
   std::thread sender_thread{[&]() {
     while (!should_stop) {
-      queue.enqueue(written_messages++);
+      queue.enqueue(new_value<T>(written_messages++));
     }
   }};
 
@@ -98,7 +122,7 @@ BenchResult run_moody_bench(size_t capacity, size_t num_readers,
   for (size_t i = 0; i < num_readers; i++) {
     reader_threads.push_back(std::thread{[&, i]() {
       while (!should_stop) {
-        uint64_t msg;
+        T msg;
         bool success = queue.try_dequeue(msg);
         if (success)
           read_messages[i]++;
@@ -122,7 +146,7 @@ void print_results(const BenchResult &results) {
   for (size_t n : results.read_messages)
     tot_read_messages += n;
 
-  printf("duration: \t\t %lli millseconds\n", results.duration.count());
+  printf("duration: \t\t %zu millseconds\n", results.duration.count());
   printf("num_readers: \t\t %zu reader\n", results.num_readers);
   printf("written_msgs: \t\t %zu message/sec\n",
          results.written_messages / (results.duration.count() / 1000));
@@ -133,44 +157,73 @@ void print_results(const BenchResult &results) {
 }
 
 int main() {
-  printf("broadcast_queue<default_waiting_strategy>:\n");
-  printf("------------------------------------------\n");
+  printf("broadcast_queue<std::string, default_waiting_strategy>:\n");
+  printf("-------------------------------------------------------\n");
+  print_results(
+      run_broadcast_queue_bench<default_waiting_strategy, std::string>(
+          1024, 1, std::chrono::seconds(10)));
+  print_results(
+      run_broadcast_queue_bench<default_waiting_strategy, std::string>(
+          1024, 5, std::chrono::seconds(10)));
+  print_results(
+      run_broadcast_queue_bench<default_waiting_strategy, std::string>(
+          1024, 10, std::chrono::seconds(10)));
+  printf("\n");
+
+  printf("broadcast_queue<uint64_t, default_waiting_strategy>:\n");
+  printf("----------------------------------------------------\n");
   print_results(run_broadcast_queue_bench(1024, 1, std::chrono::seconds(10)));
   print_results(run_broadcast_queue_bench(1024, 5, std::chrono::seconds(10)));
   print_results(run_broadcast_queue_bench(1024, 10, std::chrono::seconds(10)));
   printf("\n");
 
-  printf("broadcast_queue<semaphore_waiting_strategy>:\n");
-  printf("-------------------------------------------\n");
+  printf("broadcast_queue<uint64_t, semaphore_waiting_strategy>:\n");
+  printf("------------------------------------------------------\n");
+  print_results(run_broadcast_queue_bench<semaphore_waiting_strategy>(
+      1024, 1, std::chrono::seconds(10)));
+  print_results(run_broadcast_queue_bench<semaphore_waiting_strategy>(
+      1024, 5, std::chrono::seconds(10)));
+  print_results(run_broadcast_queue_bench<semaphore_waiting_strategy>(
+      1024, 10, std::chrono::seconds(10)));
+  printf("\n");
+
+  printf("broadcast_queue<std::string, semaphore_waiting_strategy>:\n");
+  printf("---------------------------------------------------------\n");
   print_results(
-      run_broadcast_queue_bench<broadcast_queue::semaphore_waiting_strategy>(
+      run_broadcast_queue_bench<semaphore_waiting_strategy, std::string>(
           1024, 1, std::chrono::seconds(10)));
   print_results(
-      run_broadcast_queue_bench<broadcast_queue::semaphore_waiting_strategy>(
+      run_broadcast_queue_bench<semaphore_waiting_strategy, std::string>(
           1024, 5, std::chrono::seconds(10)));
   print_results(
-      run_broadcast_queue_bench<broadcast_queue::semaphore_waiting_strategy>(
+      run_broadcast_queue_bench<semaphore_waiting_strategy, std::string>(
           1024, 10, std::chrono::seconds(10)));
   printf("\n");
 
-#ifdef __linux__
-  printf("broadcast_queue<futex_waiting_strategy>:\n");
-  printf("----------------------------------------\n");
-  print_results(
-      run_broadcast_queue_bench<broadcast_queue::futex_waiting_strategy>(
-          1024, 1, std::chrono::seconds(10)));
-  print_results(
-      run_broadcast_queue_bench<broadcast_queue::futex_waiting_strategy>(
-          1024, 5, std::chrono::seconds(10)));
-  print_results(
-      run_broadcast_queue_bench<broadcast_queue::futex_waiting_strategy>(
-          1024, 10, std::chrono::seconds(10)));
-  printf("\n");
-#endif
-
-  printf("moodycamel::ConcurrentQueue:\n");
-  printf("----------------------------\n");
+  printf("moodycamel::ConcurrentQueue<uint64_t>:\n");
+  printf("-------------------------------------\n");
   print_results(run_moody_bench(1024, 1, std::chrono::seconds(10)));
   print_results(run_moody_bench(1024, 5, std::chrono::seconds(10)));
   print_results(run_moody_bench(1024, 10, std::chrono::seconds(10)));
+
+  printf("moodycamel::ConcurrentQueue<std::string>:\n");
+  printf("-----------------------------------------\n");
+  print_results(
+      run_moody_bench<std::string>(1024, 1, std::chrono::seconds(10)));
+  print_results(
+      run_moody_bench<std::string>(1024, 5, std::chrono::seconds(10)));
+  print_results(
+      run_moody_bench<std::string>(1024, 10, std::chrono::seconds(10)));
+
+#ifdef __linux__
+  printf("broadcast_queue<uint64_t, futex_waiting_strategy>:\n");
+  printf("--------------------------------------------------\n");
+  print_results(run_broadcast_queue_bench<futex_waiting_strategy>(
+      1024, 1, std::chrono::seconds(10)));
+  print_results(run_broadcast_queue_bench<futex_waiting_strategy>(
+      1024, 5, std::chrono::seconds(10)));
+  print_results(run_broadcast_queue_bench<futex_waiting_strategy>(
+      1024, 10, std::chrono::seconds(10)));
+  printf("\n");
+#endif
 }

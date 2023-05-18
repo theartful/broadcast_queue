@@ -1,9 +1,9 @@
 #ifndef THEARTFUL_BROADCAST_QUEUE_SEMAPHORE_WAITER
 #define THEARTFUL_BROADCAST_QUEUE_SEMAPHORE_WAITER
 
+#include <climits>
 #include <cstdlib>
 #include <ctime>
-#include <climits>
 #include <system_error>
 #include <thread>
 #include <vector>
@@ -182,6 +182,10 @@ template <typename T> class semaphore_waiting_strategy {
   using self = semaphore_waiting_strategy<T>;
 
 public:
+  template <typename U> struct rebind {
+    using other = semaphore_waiting_strategy<U>;
+  };
+
   semaphore_waiting_strategy(details::queue_data<T, self> *queue)
       : m_queue{queue} {
     m_semaphores = new semaphore[m_queue->capacity()]();

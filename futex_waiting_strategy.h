@@ -18,6 +18,10 @@ template <typename T> class futex_waiting_strategy {
   using self = futex_waiting_strategy<T>;
 
 public:
+  template <typename U> struct rebind {
+    using other = futex_waiting_strategy<U>;
+  };
+
   futex_waiting_strategy(details::queue_data<T, self> *queue)
       : m_queue{queue} {}
 
