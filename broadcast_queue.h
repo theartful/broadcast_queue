@@ -19,6 +19,12 @@
 // see: "Can Seqlocks Get Along With Programming Language Memory Models?" by
 // Hans Bohem (https://www.hpl.hp.com/techreports/2012/HPL-2012-68.pdf)
 
+#if defined(__has_feature)
+#if __has_feature(thread_sanitizer)
+#define _BROADCAST_QUEUE_TSAN
+#endif
+#endif
+
 #if defined(__amd64__) || defined(__x86_64__) || defined(_M_AMD64) ||          \
     defined(_M_X64) || defined(_M_IX86)
 #define _BROADCAST_QUEUE_TSO_MODEL
@@ -119,17 +125,20 @@ public:
     // writing the data
     std::atomic_thread_fence(std::memory_order_release);
 
-#ifdef _BROADCAST_QUEUE_TSO_MODEL
+#if defined(_BROADCAST_QUEUE_TSO_MODEL) && !defined(_BROADCAST_QUEUE_TSAN)
     // in TSO architectures (such as x86), we can use normal store operations
     // since store-store opreations will always be ordered the same in memory
     // as in the program
+    //
+    // this is also data racey (which is okay since we detect data races by
+    // the sequence number), so we don't use this method when under TSAN
     m_storage = value;
 #else
     const storage_type *value_as_storage =
         reinterpret_cast<const storage_type *>(&value);
 
     for (size_t i = 0; i < storage_per_element; i++) {
-      storage[i].store(*(value_as_storage++), std::memory_order_relaxed);
+      m_storage[i].store(*(value_as_storage++), std::memory_order_relaxed);
     }
 #endif
 
@@ -151,7 +160,7 @@ public:
         continue;
       }
 
-#ifdef _BROADCAST_QUEUE_TSO_MODEL
+#if defined(_BROADCAST_QUEUE_TSO_MODEL) && !defined(_BROADCAST_QUEUE_TSAN)
       // in TSO architectures (such as x86), we can use normal load operations
       // since load-load opreations will always be ordered the same in memory
       // as in the program
@@ -188,11 +197,19 @@ public:
   }
 
   void load_nosync(T *value) const {
-    std::memcpy((void *)value, (void *)&m_storage, sizeof(T));
+#if defined(_BROADCAST_QUEUE_TSO_MODEL) && !defined(_BROADCAST_QUEUE_TSAN)
+    *value = m_storage;
+#else
+    std::memcpy((void *)value, (void *)m_storage, sizeof(T));
+#endif
   }
 
   void store_nosync(const T &value) {
-    std::memcpy((void *)&m_storage, (void *)&value, sizeof(T));
+#if defined(_BROADCAST_QUEUE_TSO_MODEL) && !defined(_BROADCAST_QUEUE_TSAN)
+    m_storage = value;
+#else
+    std::memcpy((void *)m_storage, (void *)&value, sizeof(T));
+#endif
   }
 
   uint32_t
@@ -203,7 +220,7 @@ public:
   const void *sequence_number_address() const { return &m_sequence_number; }
 
 private:
-#ifdef _BROADCAST_QUEUE_TSO_MODEL
+#if defined(_BROADCAST_QUEUE_TSO_MODEL) && !defined(_BROADCAST_QUEUE_TSAN)
   T m_storage;
 #else
   using storage_type = char;
@@ -418,6 +435,8 @@ public:
       m_internal_queue.block(i).load_nosync(&block_ptr);
       if (block_ptr)
         std::allocator_traits<allocator>::destroy(m_allocator, block_ptr);
+      // we don't need to call deallocate since the bitmap allocator doesn't
+      // give anything back to the OS until its storage dies
     }
   }
 
@@ -458,10 +477,11 @@ public:
     // successfully locked the block
     if (block->sequence_number != old_sequence_number) {
       // we decrement the refcount to unlock the block
-      refcount = block->refcount.fetch_sub(1, std::memory_order_relaxed);
+      auto old_refcount =
+          block->refcount.fetch_sub(1, std::memory_order_acq_rel);
 
       // the last one that uses a block has to deallocate it
-      if (refcount == 0) {
+      if (old_refcount == 1) {
         destroy_and_deallocate_block(block);
       }
 
@@ -475,7 +495,7 @@ public:
     // we decrement the refcount to unlock the block, and we set the memory
     // order to release to make sure that the copy constructor finished copying
     // before we decrement the refcount
-    auto old_refcount = block->refcount.fetch_sub(1, std::memory_order_release);
+    auto old_refcount = block->refcount.fetch_sub(1, std::memory_order_acq_rel);
 
     // the last one that uses a block has to deallocate it
     if (old_refcount == 1) {
@@ -512,7 +532,7 @@ private:
       // the writer is responsible for an increment, so we decrement it to
       // indicate that the writer is done caring about this block
       auto old_refcount =
-          block_ptr->refcount.fetch_sub(1, std::memory_order_relaxed);
+          block_ptr->refcount.fetch_sub(1, std::memory_order_acq_rel);
 
       // life is good, nobody cares about this block anymore
       // so we destroy the value inside, and reuse the block
@@ -551,20 +571,15 @@ private:
     // uninititalized
     // std::allocator_traits<allocator>::construct(m_allocator, block);
 
-    // the refcount should already be set to 0, but just to be safe
-    block->refcount = 0;
-    // it's not really necessary to set the sequence number to an odd value
-    // but just to be safe
-    block->sequence_number = cursor.sequence_number + 1;
-
     // constructors may do all sorts of crazy things!
     ::new (&block->value) value_type{value};
 
-    block->sequence_number = cursor.sequence_number + 2;
+    block->sequence_number.store(cursor.sequence_number + 2,
+                                 std::memory_order_relaxed);
 
     // with the reference counter set to a positive value, this block is
     // considered valid and up to speed
-    block->refcount = 1;
+    block->refcount.store(1, std::memory_order_release);
 
     return block;
   }
