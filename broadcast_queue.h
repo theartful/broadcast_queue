@@ -118,22 +118,22 @@ public:
   void store(const T &value) {
     uint32_t sn = m_sequence_number.load(std::memory_order_relaxed);
 
-    m_sequence_number.store(sn + 1, std::memory_order_release);
+    m_sequence_number.store(sn + 1, std::memory_order_relaxed);
 
+#if defined(_BROADCAST_QUEUE_TSO_MODEL) && !defined(_BROADCAST_QUEUE_TSAN)
+    // in TSO architectures (such as x86), we can use normal store operations
+    // since store-store opreations will always be ordered the same in memory
+    // as in the program, so this fixes the problem in the cpu level, and the
+    // signal fence prevents reordering in the compiler level, so we're good
+    std::atomic_signal_fence(std::memory_order_release);
+
+    m_storage = value;
+#else
     // enforce a happens-before relationship
     // that is: we're sure that the sequence number is incremented before
     // writing the data
     std::atomic_thread_fence(std::memory_order_release);
 
-#if defined(_BROADCAST_QUEUE_TSO_MODEL) && !defined(_BROADCAST_QUEUE_TSAN)
-    // in TSO architectures (such as x86), we can use normal store operations
-    // since store-store opreations will always be ordered the same in memory
-    // as in the program
-    //
-    // this is also data racey (which is okay since we detect data races by
-    // the sequence number), so we don't use this method when under TSAN
-    m_storage = value;
-#else
     const storage_type *value_as_storage =
         reinterpret_cast<const storage_type *>(&value);
 
@@ -163,25 +163,25 @@ public:
 #if defined(_BROADCAST_QUEUE_TSO_MODEL) && !defined(_BROADCAST_QUEUE_TSAN)
       // in TSO architectures (such as x86), we can use normal load operations
       // since load-load opreations will always be ordered the same in memory
-      // as in the program
+      // as in the program, so this fixes the problem in the cpu level, and the
+      // signal fence prevents reordering in the compiler level, so we're good!
       *value = m_storage;
+
+      std::atomic_signal_fence(std::memory_order_acquire);
 #else
       storage_type *result_as_storage = reinterpret_cast<storage_type *>(value);
       for (size_t i = 0; i < storage_per_element; i++) {
         result_as_storage[i] = m_storage[i].load(std::memory_order_relaxed);
       }
-#endif
 
-      // synchronizes with the thread fence in push
-      // now we're sure that everything that happened before the store
-      // operations in push is seen after this fence
-      // this means that if the sequence_number_after is the same as the
-      // sequence_number_before, then we're sure that we read the data
-      // without any data races, since otherwise, it would mean that the
-      // writer modified the data, which necessarily means that the writer
-      // has changed the sequence number before writing, and we would have
-      // necessarily seen this thanks to the fence!
+      // this is used to synchronizes with the thread fence in push
+      // this means that any store operation that happened before the value of
+      // m_storage is stored will be seen after the fence in subsequent loads
+      // more specifically if the value of m_storage has changed while we're
+      // reading it, then we have to see the value of m_sequence_number changed
+      // after this fence
       std::atomic_thread_fence(std::memory_order_acquire);
+#endif
 
       uint32_t sequence_number_after =
           m_sequence_number.load(std::memory_order_acquire);
