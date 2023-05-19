@@ -433,10 +433,12 @@ public:
     for (size_t i = 0; i < m_internal_queue.capacity(); i++) {
       nonpod_storage_block<value_type> *block_ptr;
       m_internal_queue.block(i).load_nosync(&block_ptr);
-      if (block_ptr)
+
+      if (block_ptr) {
+        // we don't need to call deallocate since the bitmap allocator doesn't
+        // give anything back to the OS anyways until its storage dies
         std::allocator_traits<allocator>::destroy(m_allocator, block_ptr);
-      // we don't need to call deallocate since the bitmap allocator doesn't
-      // give anything back to the OS until its storage dies
+      }
     }
   }
 
