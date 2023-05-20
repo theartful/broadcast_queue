@@ -19,6 +19,10 @@
 // see: "Can Seqlocks Get Along With Programming Language Memory Models?" by
 // Hans Bohem (https://www.hpl.hp.com/techreports/2012/HPL-2012-68.pdf)
 
+#ifndef BROADCAST_QUEUE_CACHE_LINE_SIZE
+#define BROADCAST_QUEUE_CACHE_LINE_SIZE 64
+#endif
+
 #if defined(__has_feature)
 #if __has_feature(thread_sanitizer)
 #define _BROADCAST_QUEUE_TSAN
@@ -30,8 +34,10 @@
 #define _BROADCAST_QUEUE_TSO_MODEL
 #endif
 
-#ifndef BROADCAST_QUEUE_CACHE_LINE_SIZE
-#define BROADCAST_QUEUE_CACHE_LINE_SIZE 64
+#if !defined(_MSC_VER)
+#define _BROADCAST_QUEUE_NO_UNIQUE_ADDRESS [[no_unique_address]]
+#else
+#define _BROADCAST_QUEUE_NO_UNIQUE_ADDRESS [[msvc::no_unique_address]]
 #endif
 
 namespace broadcast_queue {
@@ -59,14 +65,19 @@ template <typename T> static constexpr bool is_always_lock_free() {
 #endif
 }
 
-template <typename T, typename = void> class storage_block {};
+template <typename T, typename WaitingStrategy, typename = void>
+class storage_block {};
 
 template <typename T, typename WaitingStrategy, typename = void>
 class queue_data {};
 
-template <typename T>
-class storage_block<T, typename std::enable_if<is_always_lock_free<
-                           value_with_sequence_number<T>>()>::type> {
+template <typename T, typename WaitingStrategy>
+class storage_block<T, WaitingStrategy,
+                    typename std::enable_if<is_always_lock_free<
+                        value_with_sequence_number<T>>()>::type> {
+public:
+  using waiting_strategy = WaitingStrategy;
+
 public:
   storage_block() { m_storage.store({0, 0}, std::memory_order_relaxed); }
 
@@ -75,6 +86,37 @@ public:
     uint32_t old_sn = old_storage.sequence_number;
     value_with_sequence_number<T> new_storage = {old_sn + 2, value};
     m_storage.store(new_storage, std::memory_order_relaxed);
+  }
+
+  void notify() {
+    // is this ok?
+    std::atomic<uint32_t> *sequence_number =
+        reinterpret_cast<std::atomic<uint32_t> *>(&m_storage);
+
+    m_waiter.notify(*sequence_number);
+  }
+
+  template <typename Rep, typename Period>
+  bool wait(uint32_t old_sequence_number,
+            const std::chrono::duration<Rep, Period> &timeout) {
+
+    constexpr int atomic_spin_count = 1024;
+
+    for (int i = 0; i < atomic_spin_count; i++) {
+      auto sequence_number =
+          m_storage.load(std::memory_order_relaxed).sequence_number;
+
+      if (sequence_number != old_sequence_number)
+        return true;
+
+      std::this_thread::yield();
+    }
+
+    // is this ok?
+    std::atomic<uint32_t> *sequence_number =
+        reinterpret_cast<std::atomic<uint32_t> *>(&m_storage);
+
+    return m_waiter.wait(*sequence_number, old_sequence_number, timeout);
   }
 
   bool try_load(T *value, uint32_t *read_sequence_number,
@@ -106,11 +148,15 @@ public:
 
 private:
   std::atomic<value_with_sequence_number<T>> m_storage;
+  waiting_strategy m_waiter;
 };
 
-template <typename T>
-class storage_block<T, typename std::enable_if<!is_always_lock_free<
-                           value_with_sequence_number<T>>()>::type> {
+template <typename T, typename WaitingStrategy>
+class storage_block<T, WaitingStrategy,
+                    typename std::enable_if<!is_always_lock_free<
+                        value_with_sequence_number<T>>()>::type> {
+public:
+  using waiting_strategy = WaitingStrategy;
 
 public:
   storage_block() { m_sequence_number.store(0, std::memory_order_relaxed); }
@@ -219,6 +265,26 @@ public:
 
   const void *sequence_number_address() const { return &m_sequence_number; }
 
+  void notify() { m_waiter.notify(m_sequence_number); }
+
+  template <typename Rep, typename Period>
+  bool wait(uint32_t old_sequence_number,
+            const std::chrono::duration<Rep, Period> &timeout) {
+
+    constexpr int atomic_spin_count = 1024;
+
+    for (int i = 0; i < atomic_spin_count; i++) {
+      auto sequence_number = m_sequence_number.load(std::memory_order_relaxed);
+
+      if (sequence_number != old_sequence_number)
+        return true;
+
+      std::this_thread::yield();
+    }
+
+    return m_waiter.wait(m_sequence_number, old_sequence_number, timeout);
+  }
+
 private:
 #if defined(_BROADCAST_QUEUE_TSO_MODEL) && !defined(_BROADCAST_QUEUE_TSAN)
   T m_storage;
@@ -232,6 +298,7 @@ private:
 #endif
 
   std::atomic<uint32_t> m_sequence_number;
+  waiting_strategy m_waiter;
 };
 
 struct alignas(uint64_t) Cursor {
@@ -249,9 +316,6 @@ template <typename T> struct is_pod {
 template <typename T, typename WaitingStrategy>
 class queue_data<T, WaitingStrategy,
                  typename std::enable_if<is_pod<T>::value>::type> {
-
-  friend WaitingStrategy;
-
 public:
   using value_type = T;
   using pointer = T *;
@@ -259,10 +323,11 @@ public:
 
   queue_data(size_t capacity_)
       : m_capacity{capacity_}, m_subscribers{0}, m_closed{false},
-        m_waiter{this}, m_cursor{Cursor{0, 0}} {
+        m_cursor{Cursor{0, 0}} {
 
     // uninititalized storage
-    m_storage_blocks = new storage_block<T>[m_capacity];
+    m_storage_blocks =
+        new storage_block<value_type, waiting_strategy>[m_capacity];
   }
 
   void push(const value_type &value) {
@@ -278,14 +343,13 @@ public:
     m_cursor.store(cur, std::memory_order_relaxed);
 
     block.store(value);
+    block.notify();
 
     // update cursor to the next element
     cur.pos = (pos + 1) % m_capacity;
     cur.sequence_number =
         m_storage_blocks[cur.pos].sequence_number(std::memory_order_relaxed);
     m_cursor.store(cur, std::memory_order_relaxed);
-
-    m_waiter.notify(pos, sequence_number + 2);
   }
 
   template <typename Rep, typename Period>
@@ -299,12 +363,14 @@ public:
     std::chrono::steady_clock::time_point until =
         std::chrono::steady_clock::now() + timeout;
 
+    auto &block = m_storage_blocks[*reader_pos];
+
     // first wait until sequence number is not the same as reader sequence
     // number
-    if (!m_waiter.wait(*reader_pos, *reader_sequence_number, timeout))
-      return Error::Timeout;
+    auto old_sequence_number = *reader_sequence_number - 2;
 
-    auto &block = m_storage_blocks[*reader_pos];
+    if (!block.wait(old_sequence_number, timeout))
+      return Error::Timeout;
 
     uint32_t sequence_number;
 
@@ -356,12 +422,12 @@ public:
     return m_storage_blocks[pos].sequence_number(order);
   }
 
-  const storage_block<value_type> &block(uint32_t pos) const {
+  const storage_block<value_type, waiting_strategy> &block(uint32_t pos) const {
     return m_storage_blocks[pos];
   }
 
   // I know we can const overload, but I don't like it
-  storage_block<value_type> &block_nonconst(uint32_t pos) {
+  storage_block<value_type, waiting_strategy> &block_nonconst(uint32_t pos) {
     return m_storage_blocks[pos];
   }
 
@@ -377,10 +443,9 @@ public:
 
 private:
   size_t m_capacity;
-  storage_block<value_type> *m_storage_blocks;
+  storage_block<value_type, waiting_strategy> *m_storage_blocks;
   std::atomic<size_t> m_subscribers;
   std::atomic<bool> m_closed;
-  waiting_strategy m_waiter;
 
   // prevents false sharing between the writer who constantly updates this
   // m_cursor and the readers who constantly read m_storage_blocks
@@ -594,9 +659,7 @@ private:
 private:
   // FIXME: the type looks horrible, think about organizing the waiting strategy
   // in a prettier way
-  queue_data<nonpod_storage_block<value_type> *,
-             typename waiting_strategy::template rebind<
-                 nonpod_storage_block<value_type> *>::other>
+  queue_data<nonpod_storage_block<value_type> *, waiting_strategy>
       m_internal_queue;
 
   allocator_storage m_storage;
@@ -605,53 +668,43 @@ private:
 
 } // namespace details
 
-template <typename T> class condition_variable_waiting_strategy {
-  using self = condition_variable_waiting_strategy<T>;
-
+class condition_variable_waiting_strategy {
 public:
-  template <typename U> struct rebind {
-    using other = condition_variable_waiting_strategy<U>;
-  };
+  condition_variable_waiting_strategy() {}
 
-  condition_variable_waiting_strategy(details::queue_data<T, self> *queue)
-      : m_queue{queue} {}
-
-  void notify(uint32_t pos, uint32_t sequence_number) {
+  void notify(const std::atomic<uint32_t> &) {
     std::lock_guard<std::mutex> lock(m_mutex);
     m_cv.notify_all();
   }
 
   template <typename Rep, typename Period>
-  bool wait(uint32_t reader_pos, uint32_t reader_sequence_number,
+  bool wait(std::atomic<uint32_t> &sequence_number,
+            uint32_t old_sequence_number,
             const std::chrono::duration<Rep, Period> &timeout) {
-
-    uint32_t old_sequence_number = reader_sequence_number - 2;
-
-    auto &block = m_queue->block(reader_pos);
     // this means that we're at the tip of the queue, so we just have to
     // wait until m_cursor is updated
-    if (block.sequence_number() == old_sequence_number) {
+    if (sequence_number.load(std::memory_order_relaxed) ==
+        old_sequence_number) {
       std::unique_lock<std::mutex> lock{m_mutex};
-      return m_cv.wait_for(lock, timeout, [&block, old_sequence_number]() {
+      return m_cv.wait_for(lock, timeout, [&]() {
         // the condition variable is on m_cursor not on the sequence
         // numbers, but if the cursor has gone over `pos` then it has to
         // have updated the sequence number before changing the cursor value
-        return block.sequence_number() != old_sequence_number;
+        return sequence_number.load(std::memory_order_relaxed) !=
+               old_sequence_number;
       });
     }
     return true;
   }
 
 private:
-  details::queue_data<T, self> *m_queue;
   std::mutex m_mutex;
   std::condition_variable m_cv;
 };
 
-template <typename T>
-using default_waiting_strategy = condition_variable_waiting_strategy<T>;
+using default_waiting_strategy = condition_variable_waiting_strategy;
 
-template <typename T, typename WaitingStrategy = default_waiting_strategy<T>>
+template <typename T, typename WaitingStrategy = default_waiting_strategy>
 class receiver {
   using queue_data = details::queue_data<T, WaitingStrategy>;
 
@@ -697,7 +750,7 @@ private:
   details::Cursor m_cursor;
 };
 
-template <typename T, typename WaitingStrategy = default_waiting_strategy<T>>
+template <typename T, typename WaitingStrategy = default_waiting_strategy>
 class sender {
   using queue_data = details::queue_data<T, WaitingStrategy>;
 

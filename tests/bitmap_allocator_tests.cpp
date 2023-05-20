@@ -2,11 +2,13 @@
 
 #include <gtest/gtest.h>
 
-#include "bitmap_allocator.h"
 #include <array>
 #include <chrono>
 #include <random>
 #include <thread>
+
+#include "bitmap_allocator.h"
+#include "utils.h"
 
 template <int Alignment, int Size> struct alignas(Alignment) AlignedStruct {
   std::array<char, Size> data;
@@ -25,29 +27,6 @@ using MyTypes =
 template <typename T> class BitmapAllocator : public testing::Test {};
 
 TYPED_TEST_SUITE(BitmapAllocator, MyTypes);
-
-// pretty much std::iota
-template <typename T> T new_value(int idx) {
-  T data;
-  char *ptr = (char *)&data;
-  int cur = idx;
-  char *cur_bytes = (char *)(&cur);
-  int cur_bytes_idx = 0;
-
-  for (int i = 0; i < sizeof(data); i++) {
-    ptr[i] = cur_bytes[cur_bytes_idx++];
-
-    if (cur_bytes_idx == sizeof(cur)) {
-      cur++;
-      cur_bytes_idx = 0;
-    }
-  }
-  return data;
-}
-
-template <> inline std::string new_value<std::string>(int idx) {
-  return std::string("string number: ") + std::to_string(idx);
-}
 
 template <typename T, typename Alloc> T *allocate_and_construct(Alloc alloc) {
   using ReboundAlloc =

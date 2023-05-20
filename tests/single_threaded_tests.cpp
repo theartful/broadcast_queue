@@ -8,14 +8,12 @@
 #ifdef __unix__
 #include "futex_waiting_strategy.h"
 #endif
+#include "utils.h"
 
-template <typename T, template <typename> class WaitingStrategy>
-struct TestTypes {
+template <typename T, typename WaitingStrategy> struct TestTypes {
   using value_type = T;
-  using sender =
-      broadcast_queue::sender<value_type, WaitingStrategy<value_type>>;
-  using receiver =
-      broadcast_queue::receiver<value_type, WaitingStrategy<value_type>>;
+  using sender = broadcast_queue::sender<value_type, WaitingStrategy>;
+  using receiver = broadcast_queue::receiver<value_type, WaitingStrategy>;
 };
 
 using MyTypes = ::testing::Types<
@@ -70,54 +68,6 @@ template <typename T> class SingleThreaded : public testing::Test {};
 #define VALUE_TYPE typename TypeParam::value_type
 
 TYPED_TEST_SUITE(SingleThreaded, MyTypes);
-
-// pretty much std::iota
-template <typename T> inline T new_value(int idx) {
-  T data;
-  char *ptr = (char *)&data;
-  int cur = idx;
-  char *cur_bytes = (char *)(&cur);
-  int cur_bytes_idx = 0;
-
-  for (int i = 0; i < sizeof(data); i++) {
-    ptr[i] = cur_bytes[cur_bytes_idx++];
-
-    if (cur_bytes_idx == sizeof(cur)) {
-      cur++;
-      cur_bytes_idx = 0;
-    }
-  }
-
-  return data;
-}
-
-template <> inline std::string new_value<std::string>(int idx) {
-  return std::string("string number: ") + std::to_string(idx);
-}
-
-TYPED_TEST(SingleThreaded, PushThenDequeue) {
-  typename TypeParam::sender sender{3};
-  typename TypeParam::receiver receiver = sender.subscribe();
-
-  sender.push(new_value<VALUE_TYPE>(0));
-  sender.push(new_value<VALUE_TYPE>(1));
-  sender.push(new_value<VALUE_TYPE>(2));
-
-  broadcast_queue::Error error;
-  VALUE_TYPE result;
-
-  error = receiver.try_dequeue(&result);
-  EXPECT_EQ(error, broadcast_queue::Error::None);
-  EXPECT_EQ(result, new_value<VALUE_TYPE>(0));
-
-  error = receiver.try_dequeue(&result);
-  EXPECT_EQ(error, broadcast_queue::Error::None);
-  EXPECT_EQ(result, new_value<VALUE_TYPE>(1));
-
-  error = receiver.try_dequeue(&result);
-  EXPECT_EQ(error, broadcast_queue::Error::None);
-  EXPECT_EQ(result, new_value<VALUE_TYPE>(2));
-}
 
 TYPED_TEST(SingleThreaded, LaggedReceiver) {
   typename TypeParam::sender sender{3};

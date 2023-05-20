@@ -1,5 +1,6 @@
 #ifndef THEARTFUL_BROADCAST_QUEUE_FUTEX_WAITER
 #define THEARTFUL_BROADCAST_QUEUE_FUTEX_WAITER
+#include <cstdint>
 #if __linux__
 
 #include <atomic>
@@ -13,27 +14,20 @@
 
 #include "broadcast_queue.h"
 
+#include <iostream>
+
 namespace broadcast_queue {
 
-template <typename T> class futex_waiting_strategy {
-  using self = futex_waiting_strategy<T>;
-
+class futex_waiting_strategy {
 public:
-  template <typename U> struct rebind {
-    using other = futex_waiting_strategy<U>;
-  };
+  futex_waiting_strategy() : m_waiters{0} {}
 
-  futex_waiting_strategy(details::queue_data<T, self> *queue)
-      : m_queue{queue} {}
-
-  void notify(uint32_t pos, uint32_t sequence_number) {
+  void notify(std::atomic<uint32_t> &sequence_number) {
     // we wake people up only if there are people to wake in the first place!
     if (m_waiters.load(std::memory_order_relaxed) > 0) {
-      long result = ::syscall(
-          SYS_futex,
-          static_cast<const void *>(
-              m_queue->m_storage_blocks[pos].sequence_number_address()),
-          FUTEX_WAKE, INT_MAX, NULL, NULL, 0);
+      long result =
+          ::syscall(SYS_futex, static_cast<const void *>(&sequence_number),
+                    FUTEX_WAKE, INT_MAX, NULL, NULL, 0);
 
       if (result == -1)
         throw std::system_error(errno, std::system_category());
@@ -41,24 +35,13 @@ public:
   }
 
   template <typename Rep, typename Period>
-  bool wait(uint32_t reader_pos, uint32_t reader_sequence_number,
+  bool wait(std::atomic<uint32_t> &sequence_number,
+            uint32_t old_sequence_number,
             const std::chrono::duration<Rep, Period> &timeout) {
 
-    uint32_t old_sequence_number = reader_sequence_number - 2;
-
-    const auto &block = m_queue->block(reader_pos);
-
     if (timeout.count() == 0)
-      return block.sequence_number() != old_sequence_number;
-
-    constexpr int atomic_spin_count = 1024;
-
-    for (int i = 0; i < atomic_spin_count; i++) {
-      if (block.sequence_number() != old_sequence_number)
-        return true;
-
-      std::this_thread::yield();
-    }
+      return sequence_number.load(std::memory_order_relaxed) !=
+             old_sequence_number;
 
     auto until = std::chrono::steady_clock::now() + timeout;
 
@@ -78,12 +61,12 @@ public:
     m_waiters.fetch_add(1, std::memory_order_relaxed);
 
     // in golang, I would have written
-    // defer m_waiters.fetch_sub(1, std::memory_order_relaxed);
+    // defer waiters.fetch_sub(1, std::memory_order_relaxed);
 
     do {
-      long result = ::syscall(
-          SYS_futex, static_cast<const void *>(block.sequence_number_address()),
-          FUTEX_WAIT, old_sequence_number, &timeout_spec, NULL, 0);
+      long result =
+          ::syscall(SYS_futex, static_cast<const void *>(&sequence_number),
+                    FUTEX_WAIT, old_sequence_number, &timeout_spec, NULL, 0);
 
       if (result == -1) {
         switch (errno) {
@@ -112,7 +95,6 @@ public:
   }
 
 private:
-  details::queue_data<T, self> *m_queue;
   std::atomic<uint32_t> m_waiters;
 };
 

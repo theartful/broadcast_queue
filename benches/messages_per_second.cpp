@@ -44,18 +44,11 @@ template <typename T> T new_value(int idx) {
 template <> inline std::string new_value<std::string>(int idx) {
   return std::string("string number: ") + std::to_string(idx);
 }
-template <template <typename> class WaitingStrategy = default_waiting_strategy,
+template <typename WaitingStrategy = default_waiting_strategy,
           typename T = uint64_t>
 BenchResult run_broadcast_queue_bench(size_t capacity, size_t num_readers,
                                       std::chrono::milliseconds duration) {
-  sender<T, WaitingStrategy<T>> sender(capacity);
-
-  std::vector<receiver<T, WaitingStrategy<T>>> receivers;
-  receivers.reserve(num_readers);
-
-  for (size_t i = 0; i < num_readers; i++) {
-    receivers.push_back(sender.subscribe());
-  }
+  sender<T, WaitingStrategy> sender(capacity);
 
   std::atomic<bool> should_stop{false};
 
@@ -74,7 +67,7 @@ BenchResult run_broadcast_queue_bench(size_t capacity, size_t num_readers,
 
   for (size_t i = 0; i < num_readers; i++) {
     reader_threads.push_back(std::thread{[&, i]() {
-      auto &receiver = receivers[i];
+      auto receiver = sender.subscribe();
 
       while (!should_stop) {
         Error error;
@@ -177,16 +170,6 @@ int main() {
   print_results(run_broadcast_queue_bench(1024, 10, std::chrono::seconds(10)));
   printf("\n");
 
-  printf("broadcast_queue<uint64_t, semaphore_waiting_strategy>:\n");
-  printf("------------------------------------------------------\n");
-  print_results(run_broadcast_queue_bench<semaphore_waiting_strategy>(
-      1024, 1, std::chrono::seconds(10)));
-  print_results(run_broadcast_queue_bench<semaphore_waiting_strategy>(
-      1024, 5, std::chrono::seconds(10)));
-  print_results(run_broadcast_queue_bench<semaphore_waiting_strategy>(
-      1024, 10, std::chrono::seconds(10)));
-  printf("\n");
-
   printf("broadcast_queue<std::string, semaphore_waiting_strategy>:\n");
   printf("---------------------------------------------------------\n");
   print_results(
@@ -200,11 +183,15 @@ int main() {
           1024, 10, std::chrono::seconds(10)));
   printf("\n");
 
-  printf("moodycamel::ConcurrentQueue<uint64_t>:\n");
-  printf("-------------------------------------\n");
-  print_results(run_moody_bench(1024, 1, std::chrono::seconds(10)));
-  print_results(run_moody_bench(1024, 5, std::chrono::seconds(10)));
-  print_results(run_moody_bench(1024, 10, std::chrono::seconds(10)));
+  printf("broadcast_queue<uint64_t, semaphore_waiting_strategy>:\n");
+  printf("------------------------------------------------------\n");
+  print_results(run_broadcast_queue_bench<semaphore_waiting_strategy>(
+      1024, 1, std::chrono::seconds(10)));
+  print_results(run_broadcast_queue_bench<semaphore_waiting_strategy>(
+      1024, 5, std::chrono::seconds(10)));
+  print_results(run_broadcast_queue_bench<semaphore_waiting_strategy>(
+      1024, 10, std::chrono::seconds(10)));
+  printf("\n");
 
   printf("moodycamel::ConcurrentQueue<std::string>:\n");
   printf("-----------------------------------------\n");
@@ -214,6 +201,12 @@ int main() {
       run_moody_bench<std::string>(1024, 5, std::chrono::seconds(10)));
   print_results(
       run_moody_bench<std::string>(1024, 10, std::chrono::seconds(10)));
+
+  printf("moodycamel::ConcurrentQueue<uint64_t>:\n");
+  printf("-------------------------------------\n");
+  print_results(run_moody_bench(1024, 1, std::chrono::seconds(10)));
+  print_results(run_moody_bench(1024, 5, std::chrono::seconds(10)));
+  print_results(run_moody_bench(1024, 10, std::chrono::seconds(10)));
 
 #ifdef __linux__
   printf("broadcast_queue<uint64_t, futex_waiting_strategy>:\n");

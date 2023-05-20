@@ -61,6 +61,16 @@ install(
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}"
 )
 
+if(ENABLE_ASAN)
+    add_compile_options(-fsanitize=address)
+    add_link_options(-fsanitize=address)
+endif()
+
+if(ENABLE_TSAN)
+    add_compile_options(-fsanitize=thread)
+    add_link_options(-fsanitize=thread)
+endif()
+
 # testing
 if(BUILD_TESTING)
     enable_testing()
@@ -81,7 +91,9 @@ if(BUILD_TESTING)
         tests/multi_threaded_tests.cpp
         tests/bitmap_allocator_tests.cpp
     )
-    target_link_libraries(tests GTest::gtest_main broadcast_queue)
+    target_link_libraries(tests PRIVATE GTest::gtest_main broadcast_queue)
+    target_include_directories(tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+
     gtest_discover_tests(tests)
 endif()
 

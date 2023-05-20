@@ -1,6 +1,7 @@
 #ifndef THEARTFUL_BROADCAST_QUEUE_SEMAPHORE_WAITER
 #define THEARTFUL_BROADCAST_QUEUE_SEMAPHORE_WAITER
 
+#include <atomic>
 #include <climits>
 #include <cstdlib>
 #include <ctime>
@@ -178,68 +179,69 @@ private:
 // TODO
 #endif
 
-template <typename T> class semaphore_waiting_strategy {
-  using self = semaphore_waiting_strategy<T>;
-
+class semaphore_waiting_strategy {
 public:
-  template <typename U> struct rebind {
-    using other = semaphore_waiting_strategy<U>;
-  };
+  semaphore_waiting_strategy() : m_semaphore{0}, m_waiters{0} {}
 
-  semaphore_waiting_strategy(details::queue_data<T, self> *queue)
-      : m_queue{queue} {
-    m_semaphores = new semaphore[m_queue->capacity()]();
-  }
+  ~semaphore_waiting_strategy() {}
 
-  ~semaphore_waiting_strategy() { delete[] m_semaphores; }
-
-  void notify(uint32_t pos, uint32_t sequence_number) {
-    int subscribers = static_cast<int>(m_queue->subscribers());
-
+  void notify(std::atomic<uint32_t> &sequence_number) {
     // getting the value is ok even though it might change because if it changes
     // it would mean that a reader decremented it and read the new value that
     // we're notifying on, and it's okay if we overcount him
-    int semaphore_value = m_semaphores[pos].value();
-    if (subscribers > semaphore_value)
-      m_semaphores[pos].release(subscribers - semaphore_value);
+    int semaphore_value = m_semaphore.value();
+
+    // the number of waiters isn't accurate because:
+    // 1. it might decrease from the point we loaded it here, until the point
+    //    we use it. this is ok since this would mean we overcounted a waiter,
+    //    and it this won't cause problems
+    // 2. it might increase from point we loaded it here, until the point we use
+    //    it, but this is ok, since the reader will check again on the sequence
+    //    number after he has increased the number of waiters, and in that case
+    //    he would find that the sequence number has changed and wouldn't need
+    //    to wait
+    auto waiters = m_waiters.load(std::memory_order_relaxed);
+
+    if (waiters > semaphore_value)
+      m_semaphore.release(waiters - semaphore_value);
   }
 
   template <typename Rep, typename Period>
-  bool wait(uint32_t reader_pos, uint32_t reader_sequence_number,
+  bool wait(std::atomic<uint32_t> &sequence_number,
+            uint32_t old_sequence_number,
             const std::chrono::duration<Rep, Period> &timeout) {
 
-    uint32_t old_sequence_number = reader_sequence_number - 2;
+    m_waiters.fetch_add(1, std::memory_order_acq_rel);
 
-    auto &block = m_queue->block(reader_pos);
-
-    if (block.sequence_number() != old_sequence_number)
+    // we have to check again on the sequence number after we've incremented
+    // m_waiters because the writer might miss our increment if he was already
+    // in the notify method
+    // but if he's in the notify method, then the sequence_number has changed
+    if (sequence_number.load(std::memory_order_relaxed) !=
+        old_sequence_number) {
+      m_waiters.fetch_sub(1, std::memory_order_relaxed);
       return true;
-
-    constexpr int atomic_spin_count = 128;
-
-    for (int i = 0; i < atomic_spin_count; i++) {
-      if (block.sequence_number() != old_sequence_number)
-        return true;
-
-      std::this_thread::yield();
     }
 
     auto until = std::chrono::steady_clock::now() + timeout;
     do {
-      if (m_semaphores[reader_pos].try_acquire_for(timeout)) {
-        if (block.sequence_number() != old_sequence_number) {
+      if (m_semaphore.try_acquire_for(timeout)) {
+        if (sequence_number.load(std::memory_order_relaxed) !=
+            old_sequence_number) {
+          m_waiters.fetch_sub(1, std::memory_order_relaxed);
           return true;
         }
       }
     } while (std::chrono::steady_clock::now() < until);
 
     // timed out
+    m_waiters.fetch_sub(1, std::memory_order_relaxed);
     return false;
   }
 
 private:
-  details::queue_data<T, self> *m_queue;
-  semaphore *m_semaphores;
+  semaphore m_semaphore;
+  std::atomic<uint64_t> m_waiters;
 };
 
 } // namespace broadcast_queue
