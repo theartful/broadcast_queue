@@ -56,14 +56,16 @@ template <typename T> struct alignas(uint64_t) value_with_sequence_number {
   T value;
 };
 
-template <typename T> static constexpr bool is_always_lock_free() {
+template <typename T> struct is_always_lock_free {
 #ifdef __cpp_lib_atomic_is_always_lock_free
-  return std::atomic<T>::is_always_lock_free;
+  static constexpr bool value = std::atomic<T>::is_always_lock_free;
 #else
-  return sizeof(T) < 8 && std::is_trivially_destructible<T>::value &&
-         std::is_trivially_copyable<T>::value;
+  static constexpr bool value = sizeof(T) < 8 &&
+                                std::is_trivially_destructible<T>::value &&
+                                std::is_trivially_copyable<T>::value &&
+                                std::is_trivially_constructible<T>::value;
 #endif
-}
+};
 
 template <typename T, typename WaitingStrategy, typename = void>
 class storage_block {};
@@ -74,7 +76,7 @@ class queue_data {};
 template <typename T, typename WaitingStrategy>
 class storage_block<T, WaitingStrategy,
                     typename std::enable_if<is_always_lock_free<
-                        value_with_sequence_number<T>>()>::type> {
+                        value_with_sequence_number<T>>::value>::type> {
 public:
   using waiting_strategy = WaitingStrategy;
 
@@ -154,7 +156,7 @@ private:
 template <typename T, typename WaitingStrategy>
 class storage_block<T, WaitingStrategy,
                     typename std::enable_if<!is_always_lock_free<
-                        value_with_sequence_number<T>>()>::type> {
+                        value_with_sequence_number<T>>::value>::type> {
 public:
   using waiting_strategy = WaitingStrategy;
 

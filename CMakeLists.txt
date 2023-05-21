@@ -15,6 +15,8 @@ ${PROJECT_NAME} INTERFACE
     bitmap_allocator.h
 )
 
+set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_STANDARD 11)
+
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
