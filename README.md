@@ -107,8 +107,25 @@ target_link_libraries(target PUBLIC broadcast_queue)
     of pointers employing the same strategy already used, and the second layer
     would contain the actual data, which would be allocated using the
     aforementioned lock-free bitmap allocator.
-- [ ] Try 128-bit atomic intrinsics on x64 architecture to get rid of seqlocks
-in the case when stored data is 64-bit long.
+- [ ] Try 128-bit atomic intrinsics on x64 architecture (CMPXCHG16B) to get rid
+of seqlocks in the case when stored data is 64-bit long.
+- [ ] Support multi producers. Two approaches in mind:
+    - [ ] Try out [flat combining][4].
+    - [ ] Or more realistically, split the writer cursor into two: pending and
+    committed, where the pending one is always ahead of or equal to the committed
+    one, and the elements between the pending and the committed would represent
+    the ones being written by the producers at that moment.
+- [ ] Provide benchmark results against java's disruptor, and similar implementations
+of the disruptor pattern in C++.
+
+## Resources
+
+* [Can Seqlocks Get Along With Programming Language Memory Models?][1]
+* [Trading at light speed: designing low latency systems in C++ - David Gross - Meeting C++ 2022][2]
+* [Building a Lock-free Multi-producer, Multi-consumer Queue for Tcmalloc - Matt Kulukundis - CppCon 21][3]
+* [Flat Combining and the Synchronization-Parallelism Tradeoff][4]
 
 [1]: https://www.hpl.hp.com/techreports/2012/HPL-2012-68.pdf 
-
+[2]: https://www.youtube.com/watch?v=Qho1QNbXBso
+[3]: https://www.youtube.com/watch?v=_qaKkHuHYE0
+[4]: https://people.csail.mit.edu/shanir/publications/Flat%20Combining%20SPAA%2010.pdf
