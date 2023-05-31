@@ -107,7 +107,7 @@ target_link_libraries(target PUBLIC broadcast_queue)
     of pointers employing the same strategy already used, and the second layer
     would contain the actual data, which would be allocated using the
     aforementioned lock-free bitmap allocator.
-- [ ] Try 128-bit atomic intrinsics on x64 architecture (CMPXCHG16B) to get rid
+- [x] Try 128-bit atomic intrinsics on x64 architecture (CMPXCHG16B) to get rid
 of seqlocks in the case when stored data is 64-bit long.
 - [ ] Support multi producers. Two approaches in mind:
     - [ ] Try out [flat combining][4].
