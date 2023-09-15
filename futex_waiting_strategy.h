@@ -12,8 +12,6 @@
 #include <system_error>
 #include <unistd.h>
 
-#include <iostream>
-
 namespace broadcast_queue {
 
 class futex_waiting_strategy {
@@ -98,5 +96,5 @@ private:
 
 } // namespace broadcast_queue
 
-#endif // __unix__
+#endif // __linux__
 #endif // THEARTFUL_BROADCAST_QUEUE_FUTEX_WAITER

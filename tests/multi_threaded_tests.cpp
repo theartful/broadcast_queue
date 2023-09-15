@@ -8,9 +8,10 @@
 
 #include "broadcast_queue.h"
 #include "semaphore_waiting_strategy.h"
-#ifdef __unix__
+#ifdef __linux__
 #include "futex_waiting_strategy.h"
 #endif
+#include "condition_variable_waiting_strategy.h"
 #include "utils.h"
 
 template <typename T, typename WaitingStrategy> struct TestTypes {
@@ -52,7 +53,7 @@ using MyTypes = ::testing::Types<
     TestTypes<std::array<char, 2048>,
               broadcast_queue::semaphore_waiting_strategy>,
     TestTypes<std::string, broadcast_queue::semaphore_waiting_strategy>
-#ifdef __unix__
+#ifdef __linux__
     ,
     TestTypes<int, broadcast_queue::futex_waiting_strategy>,
     TestTypes<float, broadcast_queue::futex_waiting_strategy>,

@@ -26,8 +26,13 @@
 namespace broadcast_queue {
 
 static inline int ctz_fallback(uint64_t x) {
-  // TODO
-  return 0;
+    int count = 0;
+    while ((x & 1) == 0) {
+        ++count;
+        x >>= 1;
+    }
+
+    return count;
 }
 
 // count trailing zeros from the least significant bit

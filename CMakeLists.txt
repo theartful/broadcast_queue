@@ -10,6 +10,7 @@ project(
 add_library(
 ${PROJECT_NAME} INTERFACE
     broadcast_queue.h
+    condition_variable_waiting_strategy.h
     futex_waiting_strategy.h
     semaphore_waiting_strategy.h
     bitmap_allocator.h

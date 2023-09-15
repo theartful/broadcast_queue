@@ -11,6 +11,12 @@
 #include <thread>             // for yielding the thread
 #include <type_traits>        // for all sorts of type operations
 
+#if __linux__
+#include "futex_waiting_strategy.h"
+#else
+#include "condition_variable_waiting_strategy.h"
+#endif
+
 #include "bitmap_allocator.h"
 
 // implements a fixed-size single producer multiple consumer fan-out circular
@@ -388,12 +394,6 @@ public:
         else
           *reader_sequence_number += 2;
 
-        // TODO: make it optional between resubscription and resetting to the
-        // oldest data
-        // the problem with resetting to the oldest data is in the case of a
-        // fast writer, the oldest data will be written on, and it would cause
-        // the reader to lag again
-
         return Error::Lagged;
       } else {
         *reader_pos = (*reader_pos + 1) % m_capacity;
@@ -659,8 +659,6 @@ private:
   }
 
 private:
-  // FIXME: the type looks horrible, think about organizing the waiting strategy
-  // in a prettier way
   queue_data<nonpod_storage_block<value_type> *, waiting_strategy>
       m_internal_queue;
 
@@ -670,41 +668,11 @@ private:
 
 } // namespace details
 
-class condition_variable_waiting_strategy {
-public:
-  condition_variable_waiting_strategy() {}
-
-  void notify(const std::atomic<uint32_t> &) {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    m_cv.notify_all();
-  }
-
-  template <typename Rep, typename Period>
-  bool wait(std::atomic<uint32_t> &sequence_number,
-            uint32_t old_sequence_number,
-            const std::chrono::duration<Rep, Period> &timeout) {
-    // this means that we're at the tip of the queue, so we just have to
-    // wait until m_cursor is updated
-    if (sequence_number.load(std::memory_order_relaxed) ==
-        old_sequence_number) {
-      std::unique_lock<std::mutex> lock{m_mutex};
-      return m_cv.wait_for(lock, timeout, [&]() {
-        // the condition variable is on m_cursor not on the sequence
-        // numbers, but if the cursor has gone over `pos` then it has to
-        // have updated the sequence number before changing the cursor value
-        return sequence_number.load(std::memory_order_relaxed) !=
-               old_sequence_number;
-      });
-    }
-    return true;
-  }
-
-private:
-  std::mutex m_mutex;
-  std::condition_variable m_cv;
-};
-
+#if __linux__
+using default_waiting_strategy = futex_waiting_strategy;
+#else
 using default_waiting_strategy = condition_variable_waiting_strategy;
+#endif
 
 template <typename T, typename WaitingStrategy = default_waiting_strategy>
 class receiver {
@@ -754,6 +722,9 @@ private:
 
 template <typename T, typename WaitingStrategy = default_waiting_strategy>
 class sender {
+  static_assert(std::is_copy_assignable<T>::value,
+                "Queue type has to be copy assignable!");
+
   using queue_data = details::queue_data<T, WaitingStrategy>;
 
 public:

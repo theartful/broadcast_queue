@@ -5,8 +5,8 @@
 #include <vector>
 
 #include "broadcast_queue.h"
+#include "condition_variable_waiting_strategy.h"
 #include "semaphore_waiting_strategy.h"
-
 #ifdef __linux__
 #include "futex_waiting_strategy.h"
 #endif
@@ -44,7 +44,7 @@ template <typename T> T new_value(int idx) {
 template <> inline std::string new_value<std::string>(int idx) {
   return std::string("string number: ") + std::to_string(idx);
 }
-template <typename WaitingStrategy = default_waiting_strategy,
+template <typename WaitingStrategy = condition_variable_waiting_strategy,
           typename T = uint64_t>
 BenchResult run_broadcast_queue_bench(size_t capacity, size_t num_readers,
                                       std::chrono::milliseconds duration) {
@@ -150,21 +150,22 @@ void print_results(const BenchResult &results) {
 }
 
 int main() {
-  printf("broadcast_queue<std::string, default_waiting_strategy>:\n");
-  printf("-------------------------------------------------------\n");
-  print_results(
-      run_broadcast_queue_bench<default_waiting_strategy, std::string>(
-          1024, 1, std::chrono::seconds(10)));
-  print_results(
-      run_broadcast_queue_bench<default_waiting_strategy, std::string>(
-          1024, 5, std::chrono::seconds(10)));
-  print_results(
-      run_broadcast_queue_bench<default_waiting_strategy, std::string>(
-          1024, 10, std::chrono::seconds(10)));
+  printf(
+      "broadcast_queue<std::string, condition_variable_waiting_strategy>:\n");
+  printf("----------------------------------------------------------------\n");
+  print_results(run_broadcast_queue_bench<condition_variable_waiting_strategy,
+                                          std::string>(
+      1024, 1, std::chrono::seconds(10)));
+  print_results(run_broadcast_queue_bench<condition_variable_waiting_strategy,
+                                          std::string>(
+      1024, 5, std::chrono::seconds(10)));
+  print_results(run_broadcast_queue_bench<condition_variable_waiting_strategy,
+                                          std::string>(
+      1024, 10, std::chrono::seconds(10)));
   printf("\n");
 
-  printf("broadcast_queue<uint64_t, default_waiting_strategy>:\n");
-  printf("----------------------------------------------------\n");
+  printf("broadcast_queue<uint64_t, condition_variable_waiting_strategy>:\n");
+  printf("----------------------------------------------------------------\n");
   print_results(run_broadcast_queue_bench(1024, 1, std::chrono::seconds(10)));
   print_results(run_broadcast_queue_bench(1024, 5, std::chrono::seconds(10)));
   print_results(run_broadcast_queue_bench(1024, 10, std::chrono::seconds(10)));
@@ -193,6 +194,28 @@ int main() {
       1024, 10, std::chrono::seconds(10)));
   printf("\n");
 
+#ifdef __linux__
+  printf("broadcast_queue<std::string, futex_waiting_strategy>:\n");
+  printf("-------------------------------------------------------\n");
+  print_results(run_broadcast_queue_bench<futex_waiting_strategy, std::string>(
+      1024, 1, std::chrono::seconds(10)));
+  print_results(run_broadcast_queue_bench<futex_waiting_strategy, std::string>(
+      1024, 5, std::chrono::seconds(10)));
+  print_results(run_broadcast_queue_bench<futex_waiting_strategy, std::string>(
+      1024, 10, std::chrono::seconds(10)));
+  printf("\n");
+
+  printf("broadcast_queue<uint64_t, futex_waiting_strategy>:\n");
+  printf("--------------------------------------------------\n");
+  print_results(run_broadcast_queue_bench<futex_waiting_strategy>(
+      1024, 1, std::chrono::seconds(10)));
+  print_results(run_broadcast_queue_bench<futex_waiting_strategy>(
+      1024, 5, std::chrono::seconds(10)));
+  print_results(run_broadcast_queue_bench<futex_waiting_strategy>(
+      1024, 10, std::chrono::seconds(10)));
+  printf("\n");
+#endif
+
   printf("moodycamel::ConcurrentQueue<std::string>:\n");
   printf("-----------------------------------------\n");
   print_results(
@@ -207,16 +230,4 @@ int main() {
   print_results(run_moody_bench(1024, 1, std::chrono::seconds(10)));
   print_results(run_moody_bench(1024, 5, std::chrono::seconds(10)));
   print_results(run_moody_bench(1024, 10, std::chrono::seconds(10)));
-
-#ifdef __linux__
-  printf("broadcast_queue<uint64_t, futex_waiting_strategy>:\n");
-  printf("--------------------------------------------------\n");
-  print_results(run_broadcast_queue_bench<futex_waiting_strategy>(
-      1024, 1, std::chrono::seconds(10)));
-  print_results(run_broadcast_queue_bench<futex_waiting_strategy>(
-      1024, 5, std::chrono::seconds(10)));
-  print_results(run_broadcast_queue_bench<futex_waiting_strategy>(
-      1024, 10, std::chrono::seconds(10)));
-  printf("\n");
-#endif
 }
