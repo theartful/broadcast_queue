@@ -122,7 +122,7 @@ of the disruptor pattern in C++.
 
 * [Can Seqlocks Get Along With Programming Language Memory Models?][1]
 * [Trading at light speed: designing low latency systems in C++ - David Gross - Meeting C++ 2022][2]
-* [LMAX Disruptor and the Concepts of Mechanical Sympathy] [3]
+* [LMAX Disruptor and the Concepts of Mechanical Sympathy][3]
 * [Building a Lock-free Multi-producer, Multi-consumer Queue for Tcmalloc - Matt Kulukundis - CppCon 21][4]
 * [Flat Combining and the Synchronization-Parallelism Tradeoff][5]
 

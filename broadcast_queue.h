@@ -528,7 +528,7 @@ public:
     auto refcount = block->refcount.load(std::memory_order_relaxed);
     // the block died from underneath us!
     if (refcount == 0) {
-      return Error::Timeout;
+      return Error::Lagged;
     }
 
     // try to increment refcount so that no one will dare destroy the object
@@ -537,7 +537,7 @@ public:
                                                   std::memory_order_relaxed)) {
       // the block died from underneath us!
       if (refcount == 0) {
-        return Error::Timeout;
+        return Error::Lagged;
       }
     }
 
