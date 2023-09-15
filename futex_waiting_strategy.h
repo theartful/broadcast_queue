@@ -12,8 +12,6 @@
 #include <system_error>
 #include <unistd.h>
 
-#include "broadcast_queue.h"
-
 #include <iostream>
 
 namespace broadcast_queue {
