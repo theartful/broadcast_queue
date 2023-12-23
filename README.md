@@ -110,7 +110,7 @@ target_link_libraries(target PUBLIC broadcast_queue)
 - [x] Try 128-bit atomic intrinsics on x64 architecture (CMPXCHG16B) to get rid
 of seqlocks in the case when stored data is 64-bit long.
 - [ ] Support multi producers. Two approaches in mind:
-    - [ ] Try out [flat combining][4].
+    - [ ] Try out [flat combining][5].
     - [ ] Or more realistically, split the writer cursor into two: pending and
     committed, where the pending one is always ahead of or equal to the committed
     one, and the elements between the pending and the committed would represent
