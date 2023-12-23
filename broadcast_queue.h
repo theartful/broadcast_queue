@@ -87,7 +87,7 @@ public:
   using waiting_strategy = WaitingStrategy;
 
 public:
-  storage_block() { m_storage.store({0, 0}, std::memory_order_relaxed); }
+  storage_block() { m_storage.store({0, T{}}, std::memory_order_relaxed); }
 
   void store(const T &value) {
     auto old_storage = m_storage.load(std::memory_order_relaxed);
