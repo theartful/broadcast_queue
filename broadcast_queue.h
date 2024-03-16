@@ -429,7 +429,7 @@ public:
   }
 
   // I know we can const overload, but I don't like it
-  storage_block<value_type, waiting_strategy> &block_nonconst(uint32_t pos) {
+  storage_block<value_type, waiting_strategy> &block_mutable(uint32_t pos) {
     return m_storage_blocks[pos];
   }
 
@@ -487,7 +487,7 @@ public:
         m_allocator{&m_storage} {
 
     for (size_t i = 0; i < m_internal_queue.capacity(); i++) {
-      m_internal_queue.block_nonconst(i).store_nosync(nullptr);
+      m_internal_queue.block_mutable(i).store_nosync(nullptr);
     }
   }
 
