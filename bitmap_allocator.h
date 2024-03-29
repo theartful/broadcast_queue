@@ -26,13 +26,13 @@
 namespace broadcast_queue {
 
 static inline int ctz_fallback(uint64_t x) {
-    int count = 0;
-    while ((x & 1) == 0) {
-        ++count;
-        x >>= 1;
-    }
+  int count = 0;
+  while ((x & 1) == 0) {
+    ++count;
+    x >>= 1;
+  }
 
-    return count;
+  return count;
 }
 
 // count trailing zeros from the least significant bit
@@ -386,8 +386,8 @@ public:
   template <typename U> null_allocator(const null_allocator<U> &) {}
   template <typename U> null_allocator(null_allocator<U> &&) {}
 
-  pointer allocate(size_type n) { return nullptr; }
-  void deallocate(pointer p, size_type n) {}
+  pointer allocate(size_type) { return nullptr; }
+  void deallocate(pointer, size_type) {}
 };
 
 } // namespace broadcast_queue
