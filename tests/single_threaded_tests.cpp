@@ -76,10 +76,10 @@ TYPED_TEST(SingleThreaded, LaggedReceiver) {
   typename TypeParam::sender sender{3};
   typename TypeParam::receiver receiver = sender.subscribe();
 
-  sender.push(new_value<VALUE_TYPE>(0));
-  sender.push(new_value<VALUE_TYPE>(1));
-  sender.push(new_value<VALUE_TYPE>(2));
-  sender.push(new_value<VALUE_TYPE>(3));
+  EXPECT_TRUE(sender.push(new_value<VALUE_TYPE>(0)));
+  EXPECT_TRUE(sender.push(new_value<VALUE_TYPE>(1)));
+  EXPECT_TRUE(sender.push(new_value<VALUE_TYPE>(2)));
+  EXPECT_TRUE(sender.push(new_value<VALUE_TYPE>(3)));
 
   broadcast_queue::Error error;
   VALUE_TYPE result;
@@ -88,8 +88,8 @@ TYPED_TEST(SingleThreaded, LaggedReceiver) {
   EXPECT_EQ(error, broadcast_queue::Error::Lagged);
 
   // lagging caused the receiver to resubscribe losing all previous data
-  sender.push(new_value<VALUE_TYPE>(4));
-  sender.push(new_value<VALUE_TYPE>(5));
+  EXPECT_TRUE(sender.push(new_value<VALUE_TYPE>(4)));
+  EXPECT_TRUE(sender.push(new_value<VALUE_TYPE>(5)));
 
   error = receiver.try_dequeue(&result);
   EXPECT_EQ(error, broadcast_queue::Error::None);
@@ -112,13 +112,39 @@ TYPED_TEST(SingleThreaded, ClosedSender) {
   do {
     typename TypeParam::sender sender(2);
     receiver = sender.subscribe();
-    sender.push(new_value<VALUE_TYPE>(0));
-    sender.push(new_value<VALUE_TYPE>(1));
+    EXPECT_TRUE(sender.push(new_value<VALUE_TYPE>(0)));
+    EXPECT_TRUE(sender.push(new_value<VALUE_TYPE>(1)));
 
     error = receiver.try_dequeue(&result);
     EXPECT_EQ(error, broadcast_queue::Error::None);
     EXPECT_EQ(result, new_value<VALUE_TYPE>(0));
   } while (false);
+
+  error = receiver.try_dequeue(&result);
+  EXPECT_EQ(error, broadcast_queue::Error::Closed);
+}
+
+TYPED_TEST(SingleThreaded, ManuallyClosedSender) {
+  typename TypeParam::receiver receiver{nullptr};
+
+  broadcast_queue::Error error;
+  VALUE_TYPE result;
+
+  error = receiver.try_dequeue(&result);
+  EXPECT_EQ(error, broadcast_queue::Error::Closed);
+
+  typename TypeParam::sender sender(2);
+  receiver = sender.subscribe();
+  EXPECT_TRUE(sender.push(new_value<VALUE_TYPE>(0)));
+  EXPECT_TRUE(sender.push(new_value<VALUE_TYPE>(1)));
+
+  error = receiver.try_dequeue(&result);
+  EXPECT_EQ(error, broadcast_queue::Error::None);
+  EXPECT_EQ(result, new_value<VALUE_TYPE>(0));
+
+  sender.close();
+
+  EXPECT_FALSE(sender.push(new_value<VALUE_TYPE>(1)));
 
   error = receiver.try_dequeue(&result);
   EXPECT_EQ(error, broadcast_queue::Error::Closed);
@@ -130,9 +156,9 @@ TYPED_TEST(SingleThreaded, MultipleReceivers) {
   std::array<typename TypeParam::receiver, 10> receivers;
   std::fill(receivers.begin(), receivers.end(), sender.subscribe());
 
-  sender.push(new_value<VALUE_TYPE>(0));
-  sender.push(new_value<VALUE_TYPE>(1));
-  sender.push(new_value<VALUE_TYPE>(2));
+  EXPECT_TRUE(sender.push(new_value<VALUE_TYPE>(0)));
+  EXPECT_TRUE(sender.push(new_value<VALUE_TYPE>(1)));
+  EXPECT_TRUE(sender.push(new_value<VALUE_TYPE>(2)));
 
   broadcast_queue::Error error;
   VALUE_TYPE result;

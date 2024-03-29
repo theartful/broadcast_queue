@@ -733,16 +733,29 @@ public:
 
   sender(sender &&other) : m_internal{std::move(other.m_internal)} {}
 
-  void push(const T &value) { m_internal->push(value); }
+  bool push(const T &value) {
+    if (m_internal) {
+      m_internal->push(value);
+      return true;
+    } else {
+      return false;
+    }
+  }
+
+  void close() {
+    if (m_internal) {
+      m_internal->close();
+      m_internal = nullptr;
+    }
+  }
+
+  bool is_closed() { return m_internal; }
 
   receiver<T, WaitingStrategy> subscribe() {
     return receiver<T, WaitingStrategy>(m_internal);
   }
 
-  ~sender() {
-    if (m_internal)
-      m_internal->close();
-  }
+  ~sender() { close(); }
 
 private:
   std::shared_ptr<queue_data> m_internal;

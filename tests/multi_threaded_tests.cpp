@@ -83,9 +83,9 @@ TYPED_TEST(MultiThreaded, PushThenDequeue) {
   typename TypeParam::receiver receiver = sender.subscribe();
 
   std::thread sender_thread{[&]() {
-    sender.push(new_value<VALUE_TYPE>(0));
-    sender.push(new_value<VALUE_TYPE>(1));
-    sender.push(new_value<VALUE_TYPE>(2));
+    EXPECT_TRUE(sender.push(new_value<VALUE_TYPE>(0)));
+    EXPECT_TRUE(sender.push(new_value<VALUE_TYPE>(1)));
+    EXPECT_TRUE(sender.push(new_value<VALUE_TYPE>(2)));
   }};
 
   std::thread receiver_thread{[&]() {
@@ -121,7 +121,7 @@ TYPED_TEST(MultiThreaded, LaggedReceiver) {
   std::thread sender_thread{[&]() {
     int idx = 0;
     while (!should_stop.load(std::memory_order_relaxed)) {
-      sender.push(new_value<VALUE_TYPE>(idx++));
+      EXPECT_TRUE(sender.push(new_value<VALUE_TYPE>(idx++)));
       std::this_thread::sleep_for(sender_latency);
     }
   }};
@@ -170,7 +170,7 @@ TYPED_TEST(MultiThreaded, TimedWait) {
     ;
 
   std::this_thread::sleep_for(std::chrono::seconds(2));
-  sender.push(new_value<VALUE_TYPE>(123));
+  EXPECT_TRUE(sender.push(new_value<VALUE_TYPE>(123)));
 
   receiver_thread.join();
 }
