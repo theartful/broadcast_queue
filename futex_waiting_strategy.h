@@ -1,12 +1,12 @@
 #ifndef THEARTFUL_BROADCAST_QUEUE_FUTEX_WAITER
 #define THEARTFUL_BROADCAST_QUEUE_FUTEX_WAITER
-#include <cstdint>
 #if __linux__
 
 #include <atomic>
 #include <cerrno>
 #include <chrono>
 #include <climits>
+#include <cstdint>
 #include <linux/futex.h>
 #include <sys/syscall.h>
 #include <system_error>

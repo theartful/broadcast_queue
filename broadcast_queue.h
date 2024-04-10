@@ -1,15 +1,13 @@
 #ifndef THEARTFUL_BROADCAST_QUEUE
 #define THEARTFUL_BROADCAST_QUEUE
 
-#include <atomic>             // for atomic data types
-#include <chrono>             // for time
-#include <condition_variable> // for condition variables obviously
-#include <cstdint>            // for int types
-#include <cstring>            // for memcpy
-#include <memory>             // for smart pointers
-#include <mutex>              // for mutexes obviously
-#include <thread>             // for yielding the thread
-#include <type_traits>        // for all sorts of type operations
+#include <atomic>      // for atomic data types
+#include <chrono>      // for time
+#include <cstdint>     // for int types
+#include <cstring>     // for memcpy
+#include <memory>      // for smart pointers
+#include <thread>      // for yielding the thread
+#include <type_traits> // for all sorts of type operations
 
 #if __linux__
 #include "futex_waiting_strategy.h"
