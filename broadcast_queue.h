@@ -147,11 +147,6 @@ public:
     return m_storage.load(order).sequence_number;
   }
 
-  const void *sequence_number_address() const {
-    return &reinterpret_cast<const value_with_sequence_number<T> *>(&m_storage)
-                ->sequence_number;
-  }
-
 private:
   std::atomic<value_with_sequence_number<T>> m_storage;
   waiting_strategy m_waiter;
@@ -268,8 +263,6 @@ public:
   sequence_number(std::memory_order order = std::memory_order_relaxed) const {
     return m_sequence_number.load(order);
   }
-
-  const void *sequence_number_address() const { return &m_sequence_number; }
 
   void notify() { m_waiter.notify(m_sequence_number); }
 
