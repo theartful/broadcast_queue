@@ -21,7 +21,7 @@
 // queue of POD structs where new data is sent to all consumers.
 //
 // see: "Can Seqlocks Get Along With Programming Language Memory Models?" by
-// Hans Bohem (https://www.hpl.hp.com/techreports/2012/HPL-2012-68.pdf)
+// Hans Bohem (https://dl.acm.org/doi/10.1145/2247684.2247688)
 
 #ifndef BROADCAST_QUEUE_CACHE_LINE_SIZE
 #define BROADCAST_QUEUE_CACHE_LINE_SIZE 64

@@ -126,7 +126,7 @@ of the disruptor pattern in C++.
 * [Building a Lock-free Multi-producer, Multi-consumer Queue for Tcmalloc - Matt Kulukundis - CppCon 21][4]
 * [Flat Combining and the Synchronization-Parallelism Tradeoff][5]
 
-[1]: https://www.hpl.hp.com/techreports/2012/HPL-2012-68.pdf 
+[1]: https://dl.acm.org/doi/10.1145/2247684.2247688
 [2]: https://www.youtube.com/watch?v=8uAW5FQtcvE
 [3]: https://www.youtube.com/watch?v=Qho1QNbXBso
 [4]: https://www.youtube.com/watch?v=_qaKkHuHYE0
