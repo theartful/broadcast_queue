@@ -58,6 +58,14 @@ namespace details {
 template <typename T> struct alignas(uint64_t) value_with_sequence_number {
   uint32_t sequence_number;
   T value;
+
+  bool operator==(const value_with_sequence_number<T> &other) const {
+    return std::memcmp(this, std::addressof(other),
+                       sizeof(value_with_sequence_number<T>)) == 0;
+  }
+  bool operator!=(const value_with_sequence_number<T> &other) const {
+    return !(*this == other);
+  }
 };
 
 template <typename T> struct is_always_lock_free {
@@ -94,35 +102,25 @@ public:
     m_storage.store(new_storage, std::memory_order_relaxed);
   }
 
-  void notify() {
-    // is this ok?
-    std::atomic<uint32_t> *sequence_number =
-        reinterpret_cast<std::atomic<uint32_t> *>(&m_storage);
-
-    m_waiter.notify(*sequence_number);
-  }
+  void notify() { m_waiter.notify(m_storage); }
 
   template <typename Rep, typename Period>
   bool wait(uint32_t old_sequence_number,
             const std::chrono::duration<Rep, Period> &timeout) {
 
+    value_with_sequence_number<T> val_with_sn;
+
     constexpr int atomic_spin_count = 1024;
-
     for (int i = 0; i < atomic_spin_count; i++) {
-      auto sequence_number =
-          m_storage.load(std::memory_order_relaxed).sequence_number;
+      val_with_sn = m_storage.load(std::memory_order_relaxed);
 
-      if (sequence_number != old_sequence_number)
+      if (val_with_sn.sequence_number != old_sequence_number)
         return true;
 
       std::this_thread::yield();
     }
 
-    // is this ok?
-    std::atomic<uint32_t> *sequence_number =
-        reinterpret_cast<std::atomic<uint32_t> *>(&m_storage);
-
-    return m_waiter.wait(*sequence_number, old_sequence_number, timeout);
+    return m_waiter.wait(m_storage, val_with_sn, timeout);
   }
 
   bool try_load(T *value, uint32_t *read_sequence_number,

@@ -298,7 +298,7 @@ public:
 
   ~semaphore_waiting_strategy() {}
 
-  void notify(std::atomic<uint32_t> &sequence_number) {
+  template <typename T> void notify(std::atomic<T> &) {
     // getting the value is ok even though it might change because if it changes
     // it would mean that a reader decremented it and read the new value that
     // we're notifying on, and it's okay if we overcount him
@@ -319,9 +319,8 @@ public:
       m_semaphore.release(waiters - semaphore_value);
   }
 
-  template <typename Rep, typename Period>
-  bool wait(std::atomic<uint32_t> &sequence_number,
-            uint32_t old_sequence_number,
+  template <typename T, typename Rep, typename Period>
+  bool wait(std::atomic<T> &sequence_number, T old_sequence_number,
             const std::chrono::duration<Rep, Period> &timeout) {
 
     m_waiters.fetch_add(1, std::memory_order_acq_rel);

@@ -18,7 +18,7 @@ class futex_waiting_strategy {
 public:
   futex_waiting_strategy() : m_waiters{0} {}
 
-  void notify(std::atomic<uint32_t> &sequence_number) {
+  template <typename T> void notify(const std::atomic<T> &sequence_number) {
     // we wake people up only if there are people to wake in the first place!
     if (m_waiters.load(std::memory_order_relaxed) > 0) {
       long result =
@@ -30,9 +30,8 @@ public:
     }
   }
 
-  template <typename Rep, typename Period>
-  bool wait(std::atomic<uint32_t> &sequence_number,
-            uint32_t old_sequence_number,
+  template <typename T, typename Rep, typename Period>
+  bool wait(const std::atomic<T> &sequence_number, T old_sequence_number,
             const std::chrono::duration<Rep, Period> &timeout) {
 
     if (timeout.count() == 0)
